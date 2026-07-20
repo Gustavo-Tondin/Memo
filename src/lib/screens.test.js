@@ -171,7 +171,9 @@ describe("PeriodView", () => {
   test("separates what is pulled from what is suggested", async () => {
     bridge({
       period_tasks: [{ list: "Compras", task: task("a1", "Puxada") }],
-      period_suggestions: [{ list: "Inbox", task: task("b2", "Sugerida") }],
+      grouped_suggestions: [
+        { list: "Inbox", task: task("b2", "Sugerida"), group: "lists" },
+      ],
     });
 
     render(PeriodView, { props });
@@ -179,12 +181,28 @@ describe("PeriodView", () => {
     expect(await screen.findByText("Puxada")).toBeTruthy();
     expect(await screen.findByText("Sugerida")).toBeTruthy();
     expect(invoke).toHaveBeenCalledWith("period_tasks", { period: "day" });
-    expect(invoke).toHaveBeenCalledWith("period_suggestions", { period: "day" });
+    expect(invoke).toHaveBeenCalledWith("grouped_suggestions", { period: "day" });
+  });
+
+  test("suggestions are shown under the group that explains them", async () => {
+    bridge({
+      period_tasks: [],
+      grouped_suggestions: [
+        { list: "Inbox", task: task("a1", "Vencida"), group: "urgent" },
+        { list: "Inbox", task: task("b2", "Tranquila"), group: "lists" },
+      ],
+    });
+
+    render(PeriodView, { props });
+
+    expect(await screen.findByText("Urgente (1)")).toBeTruthy();
+    expect(await screen.findByText("Das listas (1)")).toBeTruthy();
+    expect(screen.queryByText("Em breve (0)")).toBeNull();
   });
 
   test("a task created here goes through add_task_in_period", async () => {
     // The core writes it to the Inbox; the screen must not pick a list itself.
-    bridge({ period_tasks: [], period_suggestions: [], add_task_in_period: "novo" });
+    bridge({ period_tasks: [], grouped_suggestions: [], add_task_in_period: "novo" });
 
     render(PeriodView, { props });
 
@@ -205,7 +223,7 @@ describe("PeriodView", () => {
   test("removing a pulled task only touches the period", async () => {
     bridge({
       period_tasks: [{ list: "Compras", task: task("a1", "Puxada") }],
-      period_suggestions: [],
+      grouped_suggestions: [],
       remove_from_period: true,
     });
 

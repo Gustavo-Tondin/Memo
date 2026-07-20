@@ -63,6 +63,7 @@ pub struct NotebookSettings {
     pub week_starts_on: Option<String>,
     pub restore_last_screen: Option<bool>,
     pub show_list_counts: Option<bool>,
+    pub auto_urgent_by_date: Option<bool>,
 }
 
 #[tauri::command]
@@ -193,6 +194,7 @@ pub fn notebook_settings(state: State<'_, AppState>) -> CommandResult<NotebookSe
             week_starts_on: Some(rollover.weekly.starts_on.render().to_string()),
             restore_last_screen: Some(config.restore_last_screen),
             show_list_counts: Some(config.show_list_counts),
+            auto_urgent_by_date: Some(config.auto_urgent_by_date),
         })
     })
 }
@@ -231,6 +233,9 @@ pub fn set_notebook_settings(
         }
         if let Some(v) = settings.show_list_counts {
             config.show_list_counts = v;
+        }
+        if let Some(v) = settings.auto_urgent_by_date {
+            config.auto_urgent_by_date = v;
         }
 
         nb.set_config(config)?;
@@ -280,18 +285,36 @@ pub fn delete_list(state: State<'_, AppState>, name: String) -> CommandResult<us
 
 // ------------------------------------------------------------------ tasks
 
+/// Creates a task and returns its **position** in the list, not an id.
+///
+/// A new task has no id: ids are handed out only when something needs to
+/// address the task (see `ensure_task_id`), which is what keeps a plain
+/// checklist free of comments.
 #[tauri::command]
 pub fn create_task(
     state: State<'_, AppState>,
     list: String,
     text: String,
-) -> CommandResult<String> {
+) -> CommandResult<usize> {
     state.with_notebook(|nb| {
         let mut tasks = nb.open_list(&list)?;
-        let id = tasks.add_text(text);
+        let position = tasks.add_text(text);
         tasks.save()?;
-        Ok(id)
+        Ok(position)
     })
+}
+
+/// Gives the task at `position` a stable id, and returns it.
+///
+/// The UI works with positions; the moment the user acts on a task — pulls it
+/// into a period, completes it — it needs a name that survives reordering.
+#[tauri::command]
+pub fn ensure_task_id(
+    state: State<'_, AppState>,
+    list: String,
+    position: usize,
+) -> CommandResult<String> {
+    state.with_notebook(|nb| Ok(nb.ensure_task_id(&list, position)?))
 }
 
 #[tauri::command]
@@ -304,6 +327,108 @@ pub fn edit_task_text(
     state.with_notebook(|nb| {
         let mut tasks = nb.open_list(&list)?;
         tasks.edit_text(&id, text)?;
+        tasks.save()?;
+        Ok(())
+    })
+}
+
+/// The editable fields of a task, all optional.
+///
+/// Absent means "leave alone"; present-but-null means "clear". Without that
+/// distinction there would be no way to remove a due date.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TaskFields {
+    pub text: Option<String>,
+    #[serde(deserialize_with = "present_or_absent")]
+    pub due: Option<Option<String>>,
+    #[serde(deserialize_with = "present_or_absent")]
+    pub priority: Option<Option<u8>>,
+    pub tags: Option<Vec<String>>,
+    pub description: Option<Vec<String>>,
+    #[serde(deserialize_with = "present_or_absent")]
+    pub repeat: Option<Option<String>>,
+    pub subtasks: Option<Vec<SubtaskInput>>,
+}
+
+/// Tells "field absent" apart from "field sent as null".
+///
+/// By default serde collapses both into `None`, which would make clearing a
+/// due date impossible: the UI has no other way to say "remove this".
+fn present_or_absent<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::deserialize(deserializer).map(Some)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SubtaskInput {
+    pub text: String,
+    pub done: bool,
+}
+
+/// Edits any field of a task in one call.
+///
+/// One command instead of one per field: the UI edits a task in a panel and
+/// saves it as a whole, and a half-applied edit would be worse than none.
+#[tauri::command]
+pub fn set_task_fields(
+    state: State<'_, AppState>,
+    list: String,
+    id: String,
+    fields: TaskFields,
+) -> CommandResult<()> {
+    state.with_notebook(|nb| {
+        let mut tasks = nb.open_list(&list)?;
+        let task = tasks.task_mut(&id)?;
+
+        if let Some(text) = fields.text {
+            task.text = text;
+        }
+        if let Some(due) = fields.due {
+            // An unparseable date clears it rather than being stored wrong.
+            task.due = due.as_deref().and_then(memo_core::task::parse_date);
+        }
+        if let Some(priority) = fields.priority {
+            task.priority = priority.filter(|p| (1..=3).contains(p));
+        }
+        if let Some(tags) = fields.tags {
+            task.tags = tags;
+        }
+        if let Some(description) = fields.description {
+            task.description = description;
+        }
+        if let Some(repeat) = fields.repeat {
+            task.repeat = repeat.as_deref().and_then(memo_core::task::Repeat::parse);
+        }
+        if let Some(subtasks) = fields.subtasks {
+            task.subtasks = subtasks
+                .into_iter()
+                .map(|s| memo_core::task::Subtask {
+                    text: s.text,
+                    done: s.done,
+                })
+                .collect();
+        }
+
+        tasks.save()?;
+        Ok(())
+    })
+}
+
+/// Reorders a task inside its list. Positions count tasks, not lines.
+#[tauri::command]
+pub fn move_task_to(
+    state: State<'_, AppState>,
+    list: String,
+    from: usize,
+    to: usize,
+) -> CommandResult<()> {
+    state.with_notebook(|nb| {
+        let mut tasks = nb.open_list(&list)?;
+        tasks.move_task_to(from, to)?;
         tasks.save()?;
         Ok(())
     })
@@ -422,4 +547,14 @@ pub fn refresh_periods(state: State<'_, AppState>) -> CommandResult<Vec<PeriodSt
 #[tauri::command]
 pub fn is_notebook_open(state: State<'_, AppState>) -> bool {
     state.is_open()
+}
+
+/// Suggestions with the reason each one is being offered, so the UI can group
+/// them without re-deriving the rule.
+#[tauri::command]
+pub fn grouped_suggestions(
+    state: State<'_, AppState>,
+    period: Period,
+) -> CommandResult<Vec<memo_core::notebook::Suggestion>> {
+    state.with_notebook(|nb| Ok(nb.grouped_suggestions(period)?))
 }

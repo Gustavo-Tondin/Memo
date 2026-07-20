@@ -29,6 +29,43 @@ use crate::state::{Period, StateFile};
 use crate::task::Task;
 use crate::{COMPLETED_LIST, INBOX_LIST, NOTEBOOK_CONFIG_DIR, NOTES_DIR, TASKS_DIR};
 
+/// Written into every new notebook, for whoever opens the folder without the
+/// app. Deliberately short: someone reading this is looking at a text file,
+/// not at documentation.
+const FORMAT_GUIDE: &str = "\
+These are plain Markdown checklists. Edit them in any text editor —
+Memo reads whatever you write.
+
+  - [ ] Buy milk
+  - [x] Pay the bill
+
+You can add details on indented lines below a task:
+
+  - [ ] Buy building material
+    @2026-07-25 #home #urgent !2
+    Talk to Jorge first, he gives a discount.
+    repeat: every-week
+    - [ ] Cement
+    - [ ] Sand
+
+  @2026-07-25   a date, always year-month-day
+  #home         a tag
+  !1 to !3      priority, 1 is highest
+  repeat:       every-day, every-week, every-month, every-3-days...
+  - [ ] ...     a subtask
+  anything else on an indented line is a description
+
+Two tags mean something to the app: #urgent and #pinned.
+
+The <!--id:...--> comments are Memo's. It adds one to a task only when it
+needs to keep track of it — when you pull it into your day or week, or
+complete it. You never have to write those yourself, and you can leave them
+alone.
+
+Delete a list file and Memo forgets that list. Inbox.md and Completed.md
+come back automatically.
+";
+
 /// What to do with a task's `origin` field when moving it between lists.
 ///
 /// The writer stays mechanical on purpose — deciding *when* to record an
@@ -52,6 +89,35 @@ pub enum OriginAction {
 pub struct ListedTask {
     pub list: String,
     pub task: Task,
+}
+
+/// Why a suggestion is where it is.
+///
+/// The order of the variants **is** the display order, so a group cannot be
+/// reordered by accident somewhere else in the code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SuggestionGroup {
+    /// Overdue, due today, or tagged `#urgent`.
+    Urgent,
+    /// Due in the next few days.
+    Soon,
+    /// Already chosen for this week (only offered to the day).
+    ThisWeek,
+    /// Everything else, in the order the lists have it.
+    Lists,
+}
+
+/// How many days ahead still counts as "soon".
+const SOON_WINDOW_DAYS: i64 = 3;
+
+/// A task offered for a period, and the reason it is being offered.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Suggestion {
+    pub list: String,
+    pub task: Task,
+    pub group: SuggestionGroup,
 }
 
 /// An open notebook.
@@ -83,6 +149,7 @@ impl Notebook {
         if !notebook.is_read_only() {
             notebook.migrate_legacy_names()?;
             notebook.ensure_default_lists()?;
+            notebook.write_format_guide()?;
         }
         Ok(notebook)
     }
@@ -166,7 +233,21 @@ impl Notebook {
         };
         notebook.config.save(notebook.config_path())?;
         notebook.ensure_default_lists()?;
+        notebook.write_format_guide()?;
         Ok(notebook)
+    }
+
+    /// Drops a plain-text guide next to the lists, for whoever opens the
+    /// folder without the app.
+    ///
+    /// `.txt` on purpose: the app only reads `.md`, so the guide never shows
+    /// up as a list.
+    fn write_format_guide(&self) -> Result<()> {
+        let path = self.tasks_dir().join("_FORMAT.txt");
+        if path.exists() {
+            return Ok(());
+        }
+        std::fs::write(&path, FORMAT_GUIDE).ctx(&path)
     }
 
     /// Opens the notebook, creating it if the folder is not one yet.
@@ -323,16 +404,45 @@ impl Notebook {
 
     /// Tasks of a list, ready to show.
     ///
-    /// Adopts any checkbox typed by hand outside the app: without an id the
-    /// task cannot be completed or pulled into a period, so the id is assigned
-    /// and persisted the first time the app reads the list. A read-only
-    /// notebook is shown as-is instead — adopting would be a write.
+    /// Reading does **not** hand out ids: a task only gets one when something
+    /// needs to address it (see [`Notebook::ensure_task_id`]). Opening a list
+    /// therefore leaves a hand-written file exactly as it was.
+    ///
+    /// The one thing reading does fix is a *duplicated* id, because that makes
+    /// two lines indistinguishable to every later operation. That is rare, so
+    /// the file is only rewritten when it actually happens.
     pub fn tasks_in(&self, list: &str) -> Result<Vec<Task>> {
         let mut tasks = self.open_list(list)?;
-        if !self.is_read_only() && tasks.ensure_unique_ids() > 0 {
+        if !self.is_read_only() && tasks.dedupe_ids() > 0 {
             tasks.save()?;
         }
         Ok(tasks.tasks().cloned().collect())
+    }
+
+    /// Gives the task at `position` in `list` an id, and returns it.
+    ///
+    /// The frontend shows tasks by position; the moment the user acts on one
+    /// — pulls it into a period, completes it — it needs a stable name. This
+    /// is where a task earns one.
+    pub fn ensure_task_id(&self, list: &str, position: usize) -> Result<String> {
+        self.ensure_writable()?;
+        let mut tasks = self.open_list(list)?;
+
+        let existing = tasks
+            .tasks()
+            .nth(position)
+            .ok_or_else(|| Error::TaskNotFound(format!("{list}[{position}]")))?
+            .id
+            .clone();
+        if let Some(id) = existing {
+            return Ok(id);
+        }
+
+        let id = tasks
+            .ensure_id_at(position)
+            .ok_or_else(|| Error::TaskNotFound(format!("{list}[{position}]")))?;
+        tasks.save()?;
+        Ok(id)
     }
 
     pub fn inbox(&self) -> Result<TaskList> {
@@ -429,17 +539,21 @@ impl Notebook {
             return Err(Error::InvalidListName(format!("{name} does not exist")));
         }
 
+        // Every task moves, not just the ones that happen to have an id —
+        // most tasks never earn one, and losing them here would be silent.
         let list = TaskList::load(&path)?;
-        let mut rescued = 0;
-        let ids: Vec<String> = list.tasks().filter_map(|t| t.id.clone()).collect();
-        for id in &ids {
-            // Inbox first, then the file goes away: a crash in between leaves
-            // a duplicate, never a hole.
-            self.transfer(id, name, INBOX_LIST, OriginAction::Keep, None)?;
-            rescued += 1;
+        let rescued: Vec<Task> = list.tasks().cloned().collect();
+
+        let mut inbox = self.inbox()?;
+        for task in &rescued {
+            inbox.add(task.clone());
         }
 
+        // Inbox first, then the file goes away: a crash in between leaves a
+        // duplicate, never a hole.
+        inbox.save()?;
         std::fs::remove_file(&path).ctx(&path)?;
+        let rescued = rescued.len();
 
         for period in [Period::Day, Period::Week] {
             let mut state = self.open_state(period)?;
@@ -604,7 +718,10 @@ impl Notebook {
     pub fn add_task_in_period(&self, period: Period, text: impl Into<String>) -> Result<String> {
         self.ensure_writable()?;
         let mut inbox = self.inbox()?;
-        let id = inbox.add_text(text);
+
+        // This one earns an id immediately: the state is about to reference
+        // it, and a reference needs something stable to point at.
+        let id = inbox.add_text_with_id(text);
         inbox.save()?;
 
         let mut file = self.open_state(period)?;
@@ -636,6 +753,73 @@ impl Notebook {
         Ok(out)
     }
 
+    /// Whether a task counts as urgent right now.
+    ///
+    /// Two sources with equal weight (spec 3.2): the `#urgent` tag the user
+    /// wrote, and a date that is today or already past. The date half can be
+    /// switched off for people who do not want the interface flagging
+    /// deadlines on its own.
+    pub fn is_urgent(&self, task: &Task) -> bool {
+        if task.is_marked_urgent() {
+            return true;
+        }
+        if !self.config.auto_urgent_by_date {
+            return false;
+        }
+        task.due.is_some_and(|due| due <= self.today())
+    }
+
+    /// What to offer pulling into a period, grouped and in display order.
+    ///
+    /// Nothing here *selects* a task — the day stays a deliberate choice.
+    /// Dates only change what is offered first.
+    pub fn grouped_suggestions(&self, period: Period) -> Result<Vec<Suggestion>> {
+        let today = self.today();
+        let soon = today + chrono::Duration::days(SOON_WINDOW_DAYS);
+
+        let in_week: std::collections::HashSet<(String, String)> = if period == Period::Day {
+            self.open_state(Period::Week)?
+                .state
+                .items
+                .iter()
+                .map(|r| (r.list.clone(), r.id.clone()))
+                .collect()
+        } else {
+            Default::default()
+        };
+
+        let mut suggestions: Vec<Suggestion> = self
+            .suggestions_for(period)?
+            .into_iter()
+            .map(|entry| {
+                let group = if self.is_urgent(&entry.task) {
+                    SuggestionGroup::Urgent
+                } else if entry.task.due.is_some_and(|due| due <= soon) {
+                    SuggestionGroup::Soon
+                } else if entry
+                    .task
+                    .id
+                    .as_ref()
+                    .is_some_and(|id| in_week.contains(&(entry.list.clone(), id.clone())))
+                {
+                    SuggestionGroup::ThisWeek
+                } else {
+                    SuggestionGroup::Lists
+                };
+                Suggestion {
+                    list: entry.list,
+                    task: entry.task,
+                    group,
+                }
+            })
+            .collect();
+
+        // Stable sort: inside a group the original order is kept, which is the
+        // order of the lists on disk — the order the user arranged.
+        suggestions.sort_by_key(|s| s.group);
+        Ok(suggestions)
+    }
+
     /// What to offer pulling into a period, in the order the UI shows it.
     ///
     /// For the day, tasks already chosen for the week come first: they are
@@ -649,18 +833,24 @@ impl Notebook {
         let mut out: Vec<ListedTask> = Vec::new();
 
         let push = |candidate: ListedTask, out: &mut Vec<ListedTask>| {
-            let Some(id) = candidate.task.id.as_deref() else {
-                return;
-            };
-            if candidate.task.done || pulled.contains(&candidate.list, id) {
+            if candidate.task.done {
                 return;
             }
-            let already = out
-                .iter()
-                .any(|t| t.list == candidate.list && t.task.id.as_deref() == Some(id));
-            if !already {
-                out.push(candidate);
+            // Most tasks have no id — one is handed out only when something
+            // needs to address the task. A task without an id has never been
+            // pulled anywhere, so it is always still a suggestion.
+            if let Some(id) = candidate.task.id.as_deref() {
+                if pulled.contains(&candidate.list, id) {
+                    return;
+                }
+                let already = out
+                    .iter()
+                    .any(|t| t.list == candidate.list && t.task.id.as_deref() == Some(id));
+                if already {
+                    return;
+                }
             }
+            out.push(candidate);
         };
 
         // The week feeds the day, but nothing feeds the week except the lists.
@@ -689,11 +879,26 @@ impl Notebook {
 
     // ------------------------------------------------------- complete / undo
 
-    /// Completes a task: it moves to `Completas.md` with its origin recorded,
-    /// and stops being pulled into Today and This Week.
+    /// Completes a task: it moves to the completed list with its origin
+    /// recorded, and stops being pulled into Today and This Week.
+    ///
+    /// A repeating task leaves its next occurrence behind in the same list,
+    /// so finishing it is also what schedules it — there is no scheduler.
     pub fn complete_task(&self, list: &str, id: &str) -> Result<Task> {
         self.ensure_writable()?;
+
+        let respawned = self
+            .open_list(list)?
+            .find(id)
+            .and_then(crate::recurrence::respawn);
+
         let task = self.transfer(id, list, COMPLETED_LIST, OriginAction::Record, Some(true))?;
+
+        if let Some(next) = respawned {
+            let mut source = self.open_list(list)?;
+            source.add(next);
+            source.save()?;
+        }
 
         // The task left the list, so any reference to it is now dangling.
         for period in [Period::Day, Period::Week] {

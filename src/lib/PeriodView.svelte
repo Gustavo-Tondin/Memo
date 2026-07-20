@@ -21,7 +21,7 @@
     try {
       [pulled, suggestions] = await Promise.all([
         api.periodTasks(period),
-        api.periodSuggestions(period),
+        api.groupedSuggestions(period),
       ]);
     } catch (e) {
       onError(e);
@@ -47,8 +47,35 @@
 
   const complete = (list, id) => act(() => api.completeTask(list, id));
   const edit = (list, id, text) => act(() => api.editTaskText(list, id, text));
-  const pull = (list, id) => act(() => api.pullInto(period, list, id));
   const remove = (list, id) => act(() => api.removeFrom(period, list, id));
+
+  // A suggestion may have no id yet — ids are handed out only when a task
+  // needs to be addressed, and pulling it into a period is exactly that.
+  const pull = (list, task) =>
+    act(async () => {
+      let id = task.id;
+      if (!id) {
+        const tasks = await api.listTasks(list);
+        const position = tasks.findIndex((t) => t.text === task.text && !t.id);
+        if (position < 0) throw { kind: "taskNotFound", message: task.text };
+        id = await api.ensureTaskId(list, position);
+      }
+      await api.pullInto(period, list, id);
+    });
+
+  const GROUPS = [
+    { key: "urgent", label: "Urgente" },
+    { key: "soon", label: "Em breve" },
+    { key: "thisWeek", label: "Da semana" },
+    { key: "lists", label: "Das listas" },
+  ];
+
+  let groups = $derived(
+    GROUPS.map((g) => ({
+      ...g,
+      items: suggestions.filter((s) => s.group === g.key),
+    })),
+  );
 
   let title = $derived(period === "day" ? "Hoje" : "Meta da semana");
   let subtitle = $derived(
@@ -87,15 +114,23 @@
 {#if suggestions.length === 0}
   <p class="empty">Nenhuma tarefa disponível.</p>
 {:else}
-  <ul>
-    {#each suggestions as entry, i (`${entry.list}/${entry.task.id ?? ""}#${i}`)}
-      <li>
-        <span>{entry.task.text}</span>
-        <small>{entry.list}</small>
-        <button onclick={() => pull(entry.list, entry.task.id)}>puxar</button>
-      </li>
-    {/each}
-  </ul>
+  {#each groups as group}
+    {#if group.items.length > 0}
+      <details open={group.key !== "lists"}>
+        <summary>{group.label} ({group.items.length})</summary>
+        <ul>
+          {#each group.items as entry, i (`${entry.list}/${entry.task.id ?? ""}#${i}`)}
+            <li>
+              <span>{entry.task.text}</span>
+              {#if entry.task.due}<small class="due">{entry.task.due}</small>{/if}
+              <small class="from">{entry.list}</small>
+              <button onclick={() => pull(entry.list, entry.task)}>puxar</button>
+            </li>
+          {/each}
+        </ul>
+      </details>
+    {/if}
+  {/each}
 {/if}
 
 <style>

@@ -23,6 +23,17 @@
     if (event.key === "Enter") save();
     if (event.key === "Escape") editing = false;
   }
+
+  let doneSubtasks = $derived(
+    (task.subtasks ?? []).filter((s) => s.done).length,
+  );
+
+  // The file always stores ISO; display follows the user's preference, which
+  // arrives already resolved from the shell. Default until settings exist.
+  function formatDate(iso) {
+    const [y, m, d] = iso.split("-");
+    return `${d}-${m}-${y}`;
+  }
 </script>
 
 <li>
@@ -48,9 +59,23 @@
     </button>
   {/if}
 
+  <!-- In list view the fields stay quiet: a compact marker, and the detail
+       only when the task is opened. Phase 9 gives this a real design. -->
+  {#if task.priority}<span class="prio">!{task.priority}</span>{/if}
+  {#if task.due}<span class="due">{formatDate(task.due)}</span>{/if}
+  {#each task.tags ?? [] as tag}<span class="tag">#{tag}</span>{/each}
+  {#if task.subtasks?.length}
+    <span class="sub">{doneSubtasks}/{task.subtasks.length}</span>
+  {/if}
+  {#if task.repeat}<span class="repeat" title="repete">↻</span>{/if}
+
   {#if showList}<small class="list">{list}</small>{/if}
   {@render children?.()}
 </li>
+
+{#if task.description?.length}
+  <li class="description">{task.description.join(" ")}</li>
+{/if}
 
 <style>
   li {
@@ -74,5 +99,30 @@
   .edit {
     flex: 1;
     font: inherit;
+  }
+  .prio,
+  .due,
+  .tag,
+  .sub,
+  .repeat {
+    font-size: 0.75rem;
+    padding: 0.05rem 0.35rem;
+    border-radius: 10px;
+    background: #eee;
+    color: #444;
+    white-space: nowrap;
+  }
+  .prio {
+    background: #ffe0e0;
+    color: #a00;
+  }
+  .tag {
+    background: #e3ecff;
+    color: #24468a;
+  }
+  .description {
+    padding: 0 0 0.35rem 2rem;
+    font-size: 0.85rem;
+    color: #666;
   }
 </style>

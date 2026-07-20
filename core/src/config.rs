@@ -85,6 +85,12 @@ pub struct Config {
     pub restore_last_screen: bool,
     /// Show how many open tasks each list has, in the navigation.
     pub show_list_counts: bool,
+    /// Treat a task due today or overdue as urgent, without being told.
+    ///
+    /// On by default, but switchable: some people find an interface that
+    /// paints deadlines red on its own more stressful than useful. The
+    /// `#urgent` tag written by hand always counts, either way.
+    pub auto_urgent_by_date: bool,
     /// The document exactly as it was read, so keys this build does not know
     /// about are written back instead of being silently dropped. This is what
     /// protects a notebook opened by two different app versions.
@@ -98,6 +104,7 @@ impl Default for Config {
             rollover: Rollover::default(),
             restore_last_screen: false,
             show_list_counts: true,
+            auto_urgent_by_date: true,
             raw: Map::new(),
         }
     }
@@ -153,6 +160,11 @@ impl Config {
                 defaults.restore_last_screen,
             ),
             show_list_counts: read_bool(&raw, "showListCounts", defaults.show_list_counts),
+            auto_urgent_by_date: read_bool(
+                &raw,
+                "autoUrgentByDate",
+                defaults.auto_urgent_by_date,
+            ),
             raw,
         }
     }
@@ -176,6 +188,10 @@ impl Config {
                 (
                     "showListCounts".to_string(),
                     Value::from(self.show_list_counts),
+                ),
+                (
+                    "autoUrgentByDate".to_string(),
+                    Value::from(self.auto_urgent_by_date),
                 ),
             ])),
         );

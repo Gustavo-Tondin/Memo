@@ -17,6 +17,7 @@ tauri-build = { version = "2", features = [] }
 # The mock runtime lets the bridge be tested without opening a window.
 tauri = { version = "2", features = ["test"] }
 tempfile = "3.14"
+chrono.workspace = true
 
 [dependencies]
 memo-core = { path = "../core" }

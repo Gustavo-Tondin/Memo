@@ -65,6 +65,21 @@ fn ok(app: &MockApp, cmd: &str, args: Value) -> Value {
     invoke(app, cmd, args).unwrap_or_else(|e| panic!("{cmd} failed: {e}"))
 }
 
+/// Creates a task and gives it an id, the way the UI does when the user acts
+/// on it. `create_task` alone returns a position: a new task has no id until
+/// something needs to address it.
+fn task_with_id(app: &MockApp, list: &str, text: &str) -> String {
+    let position = ok(app, "create_task", json!({ "list": list, "text": text }));
+    ok(
+        app,
+        "ensure_task_id",
+        json!({ "list": list, "position": position }),
+    )
+    .as_str()
+    .unwrap()
+    .to_string()
+}
+
 /// Serializes the whole suite and gives it a clean preferences file.
 ///
 /// Machine preferences are one file per machine, and **every** test that opens
@@ -137,12 +152,7 @@ fn the_full_task_lifecycle_over_the_bridge() {
     let (_lock, app, dir) = app_with_notebook();
 
     ok(&app, "create_list", json!({ "name": "Compras" }));
-    let id = ok(
-        &app,
-        "create_task",
-        json!({ "list": "Compras", "text": "Comprar leite" }),
-    );
-    let id = id.as_str().unwrap().to_string();
+    let id = task_with_id(&app, "Compras", "Comprar leite");
 
     ok(
         &app,
@@ -383,16 +393,8 @@ fn the_day_offers_the_week_first_then_the_rest() {
     let (_lock, app, _dir) = app_with_notebook();
     ok(&app, "create_list", json!({ "name": "Compras" }));
 
-    let solta = ok(
-        &app,
-        "create_task",
-        json!({ "list": "Inbox", "text": "Tarefa solta" }),
-    );
-    let semana = ok(
-        &app,
-        "create_task",
-        json!({ "list": "Compras", "text": "Escolhida pra semana" }),
-    );
+    let solta = task_with_id(&app, "Inbox", "Tarefa solta");
+    let semana = task_with_id(&app, "Compras", "Escolhida pra semana");
     ok(
         &app,
         "pull_into_period",
@@ -438,6 +440,113 @@ fn sync_conflicts_reach_the_frontend() {
 
     // And it must not have become a list in the sidebar.
     assert_eq!(ok(&app, "list_names", json!({})), json!(["Completed", "Compras", "Inbox"]));
+}
+
+#[test]
+fn the_rich_fields_round_trip_through_the_bridge() {
+    let (_lock, app, dir) = app_with_notebook();
+    let id = task_with_id(&app, "Inbox", "Comprar material");
+
+    ok(
+        &app,
+        "set_task_fields",
+        json!({
+            "list": "Inbox",
+            "id": id,
+            "fields": {
+                "due": "2026-07-25",
+                "priority": 2,
+                "tags": ["casa", "urgent"],
+                "description": ["Falar com o Jorge antes."],
+                "repeat": "every-week",
+                "subtasks": [{ "text": "Cimento", "done": false }]
+            }
+        }),
+    );
+
+    let on_disk = std::fs::read_to_string(dir.path().join("Tasks/Inbox.md")).unwrap();
+    assert!(on_disk.contains("@2026-07-25"), "{on_disk}");
+    assert!(on_disk.contains("#casa"));
+    assert!(on_disk.contains("!2"));
+    assert!(on_disk.contains("  Falar com o Jorge antes."));
+    assert!(on_disk.contains("repeat: every-week"));
+    assert!(on_disk.contains("  - [ ] Cimento"));
+
+    let tasks = ok(&app, "list_tasks", json!({ "list": "Inbox" }));
+    assert_eq!(tasks[0]["due"], "2026-07-25");
+    assert_eq!(tasks[0]["priority"], json!(2));
+    assert_eq!(tasks[0]["subtasks"][0]["text"], "Cimento");
+}
+
+#[test]
+fn a_field_can_be_cleared_but_only_when_mentioned() {
+    let (_lock, app, _dir) = app_with_notebook();
+    let id = task_with_id(&app, "Inbox", "Tarefa");
+
+    ok(
+        &app,
+        "set_task_fields",
+        json!({ "list": "Inbox", "id": id,
+                "fields": { "due": "2026-07-25", "priority": 1 } }),
+    );
+
+    // Mentioning only one field leaves the other alone...
+    ok(
+        &app,
+        "set_task_fields",
+        json!({ "list": "Inbox", "id": id, "fields": { "priority": 3 } }),
+    );
+    let tasks = ok(&app, "list_tasks", json!({ "list": "Inbox" }));
+    assert_eq!(tasks[0]["due"], "2026-07-25", "não mencionado, preservado");
+    assert_eq!(tasks[0]["priority"], json!(3));
+
+    // ...and null clears it, which is the only way to remove a date.
+    ok(
+        &app,
+        "set_task_fields",
+        json!({ "list": "Inbox", "id": id, "fields": { "due": null } }),
+    );
+    let tasks = ok(&app, "list_tasks", json!({ "list": "Inbox" }));
+    assert_eq!(tasks[0]["due"], Value::Null);
+}
+
+#[test]
+fn reordering_rewrites_the_file_in_the_new_order() {
+    let (_lock, app, dir) = app_with_notebook();
+    for text in ["Primeira", "Segunda", "Terceira"] {
+        ok(&app, "create_task", json!({ "list": "Inbox", "text": text }));
+    }
+
+    ok(
+        &app,
+        "move_task_to",
+        json!({ "list": "Inbox", "from": 2, "to": 0 }),
+    );
+
+    let on_disk = std::fs::read_to_string(dir.path().join("Tasks/Inbox.md")).unwrap();
+    let order: Vec<&str> = on_disk.lines().filter(|l| l.starts_with("- [")).collect();
+    assert_eq!(
+        order,
+        vec!["- [ ] Terceira", "- [ ] Primeira", "- [ ] Segunda"],
+        "a ordem no arquivo é a ordem da tela"
+    );
+}
+
+#[test]
+fn suggestions_arrive_grouped() {
+    let (_lock, app, dir) = app_with_notebook();
+    let today = chrono::Local::now().date_naive();
+    std::fs::write(
+        dir.path().join("Tasks/Inbox.md"),
+        format!("- [ ] Vencida\n  @{}\n- [ ] Tranquila\n", today - chrono::Duration::days(1)),
+    )
+    .unwrap();
+
+    let suggestions = ok(&app, "grouped_suggestions", json!({ "period": "day" }));
+
+    assert_eq!(suggestions[0]["task"]["text"], "Vencida");
+    assert_eq!(suggestions[0]["group"], "urgent");
+    assert_eq!(suggestions[1]["group"], "lists");
 }
 
 #[test]

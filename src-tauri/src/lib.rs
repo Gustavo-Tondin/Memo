@@ -42,13 +42,17 @@ pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
             commands::delete_list,
             // tasks
             commands::create_task,
+            commands::ensure_task_id,
             commands::edit_task_text,
+            commands::set_task_fields,
+            commands::move_task_to,
             commands::complete_task,
             commands::uncomplete_task,
             // day and week
             commands::period_state,
             commands::period_tasks,
             commands::period_suggestions,
+            commands::grouped_suggestions,
             commands::period_clock,
             commands::pull_into_period,
             commands::remove_from_period,

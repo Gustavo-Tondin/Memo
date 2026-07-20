@@ -82,7 +82,7 @@ fn adding_a_task_writes_it_to_the_file_with_an_id() {
     let notebook = Notebook::init(dir.path()).unwrap();
 
     let mut inbox = notebook.inbox().unwrap();
-    let id = inbox.add_text("Comprar leite");
+    let id = inbox.add_text_with_id("Comprar leite");
     inbox.save().unwrap();
 
     let on_disk = read(dir.path().join("Tasks/Inbox.md"));
@@ -100,7 +100,7 @@ fn editing_a_task_keeps_its_id_and_its_state() {
     let notebook = Notebook::init(dir.path()).unwrap();
 
     let mut inbox = notebook.inbox().unwrap();
-    let id = inbox.add_text("Comprar leit");
+    let id = inbox.add_text_with_id("Comprar leit");
     inbox.set_done(&id, true).unwrap();
     inbox.save().unwrap();
 
@@ -129,7 +129,7 @@ fn moving_a_task_preserves_the_id_and_records_the_origin() {
     notebook.create_list("Compras").unwrap();
 
     let mut compras = notebook.open_list("Compras").unwrap();
-    let id = compras.add_text("Comprar leite");
+    let id = compras.add_text_with_id("Comprar leite");
     compras.save().unwrap();
 
     let moved = notebook
@@ -156,7 +156,7 @@ fn moving_a_task_back_can_clear_the_origin() {
     notebook.create_list("Compras").unwrap();
 
     let mut compras = notebook.open_list("Compras").unwrap();
-    let id = compras.add_text("Comprar leite");
+    let id = compras.add_text_with_id("Comprar leite");
     compras.save().unwrap();
 
     notebook
@@ -229,25 +229,31 @@ fn list_names_that_could_escape_the_folder_are_rejected() {
 }
 
 #[test]
-fn tasks_written_by_hand_are_adopted_with_ids() {
+fn a_task_earns_an_id_only_when_something_needs_to_address_it() {
+    // Changed deliberately in 2026-07-20: reading a list used to hand ids to
+    // every task, which put a comment on lines the user never asked about.
     let dir = tempfile::tempdir().unwrap();
-    Notebook::init(dir.path()).unwrap();
+    let notebook = Notebook::init(dir.path()).unwrap();
 
     let inbox_path = dir.path().join("Tasks/Inbox.md");
-    std::fs::write(
-        &inbox_path,
-        "- [ ] escrita no Obsidian\n- [ ] já tinha id <!--id:aaa111-->\n",
-    )
-    .unwrap();
+    let original = "- [ ] escrita no Obsidian\n- [ ] já tinha id <!--id:aaa111-->\n";
+    std::fs::write(&inbox_path, original).unwrap();
 
-    let mut inbox = TaskList::load(&inbox_path).unwrap();
-    assert_eq!(inbox.ensure_unique_ids(), 1, "should adopt exactly one task");
-    inbox.save().unwrap();
+    // Reading changes nothing.
+    let tasks = notebook.tasks_in("Inbox").unwrap();
+    assert_eq!(tasks[0].id, None, "a plain line stays plain");
+    assert_eq!(tasks[1].id.as_deref(), Some("aaa111"));
+    assert_eq!(std::fs::read_to_string(&inbox_path).unwrap(), original);
 
-    let inbox = TaskList::load(&inbox_path).unwrap();
-    assert!(inbox.tasks().all(|t| t.id.is_some()));
+    // Acting on it does.
+    let id = notebook.ensure_task_id("Inbox", 0).unwrap();
+    assert!(!id.is_empty());
+    assert!(std::fs::read_to_string(&inbox_path).unwrap().contains(&id));
+
+    // And asking twice gives the same id, without rewriting anything.
+    assert_eq!(notebook.ensure_task_id("Inbox", 0).unwrap(), id);
     assert!(
-        inbox.find("aaa111").is_some(),
+        notebook.open_list("Inbox").unwrap().find("aaa111").is_some(),
         "the existing id must not be regenerated"
     );
 }
@@ -278,7 +284,7 @@ fn a_full_round_trip_through_the_notebook() {
     notebook.create_list("Compras").unwrap();
 
     let mut compras = notebook.open_list("Compras").unwrap();
-    let id = compras.add_text("Comprar leite");
+    let id = compras.add_text_with_id("Comprar leite");
     compras.save().unwrap();
 
     // complete

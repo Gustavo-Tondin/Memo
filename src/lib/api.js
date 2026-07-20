@@ -32,6 +32,12 @@ export const api = {
   // day and week
   periodTasks: (period) => invoke("period_tasks", { period }),
   periodSuggestions: (period) => invoke("period_suggestions", { period }),
+  groupedSuggestions: (period) => invoke("grouped_suggestions", { period }),
+  setTaskFields: (list, id, fields) =>
+    invoke("set_task_fields", { list, id, fields }),
+  moveTaskTo: (list, from, to) => invoke("move_task_to", { list, from, to }),
+  ensureTaskId: (list, position) =>
+    invoke("ensure_task_id", { list, position }),
   pullInto: (period, list, id) => invoke("pull_into_period", { period, list, id }),
   removeFrom: (period, list, id) =>
     invoke("remove_from_period", { period, list, id }),

@@ -43,15 +43,39 @@ impl TaskList {
         Ok(Self::from_content(path, &content))
     }
 
+    /// Parses a list from text, with no file behind it. Saving one of these
+    /// would write to an empty path, so it is for reading and for tests.
+    pub fn from_str(content: &str) -> Self {
+        Self::from_content(PathBuf::new(), content)
+    }
+
+    /// The lines as parsed, tasks and everything else.
+    pub fn lines(&self) -> &[Line] {
+        &self.lines
+    }
+
     pub(crate) fn from_content(path: PathBuf, content: &str) -> Self {
         let trailing_newline = content.is_empty() || content.ends_with('\n');
-        let lines = content
-            .lines()
-            .map(|line| match Task::parse(line) {
-                Some(task) => Line::Task(task),
-                None => Line::Raw(line.to_string()),
-            })
-            .collect();
+        let mut lines: Vec<Line> = Vec::new();
+
+        for raw in content.lines() {
+            let indent = raw.len() - raw.trim_start().len();
+
+            // A line indented further than the task above it belongs to that
+            // task — its metadata, description or subtasks. This is what makes
+            // one task span several lines.
+            if let Some(Line::Task(open)) = lines.last_mut() {
+                if !raw.trim().is_empty() && indent > open.indent.len() && open.absorb(raw) {
+                    continue;
+                }
+            }
+
+            match Task::parse(raw) {
+                Some(task) => lines.push(Line::Task(task)),
+                None => lines.push(Line::Raw(raw.to_string())),
+            }
+        }
+
         Self {
             path,
             lines,
@@ -97,27 +121,71 @@ impl TaskList {
         self.tasks().filter_map(|t| t.id.clone()).collect()
     }
 
-    /// Appends a task, assigning an id if it has none — or if the one it
-    /// carries is already taken in this file. Returns the id it ended up with.
+    /// Appends a task and returns its position among the tasks.
     ///
-    /// Ids are unique per file, not globally, so moving a task between lists
-    /// can collide with a task that already lives in the destination. Keeping
-    /// the incoming id in that case would create two lines that every lookup
-    /// confuses for one another.
-    pub fn add(&mut self, mut task: Task) -> String {
-        let taken = self.taken_ids();
-        let id = match task.id.take() {
-            Some(id) if !taken.contains(&id) => id,
-            _ => id::generate_unique(&taken),
-        };
-        task.id = Some(id.clone());
+    /// **No id is assigned.** An id only appears when the task needs to be
+    /// addressed — see [`TaskList::ensure_id_at`] — so a plain checklist never
+    /// grows comments the user did not ask for.
+    ///
+    /// An incoming id that is already taken in this file gets **replaced**,
+    /// not dropped: ids are unique per file, not globally, so a task moving
+    /// between lists can collide with one already living there. A task that
+    /// already had an id was addressable, and must stay addressable —
+    /// otherwise completing it would quietly break its undo.
+    pub fn add(&mut self, mut task: Task) -> usize {
+        if let Some(id) = &task.id {
+            let taken = self.taken_ids();
+            if taken.contains(id) {
+                task.id = Some(id::generate_unique(&taken));
+            }
+        }
         self.lines.push(Line::Task(task));
-        id
+        self.tasks().count() - 1
     }
 
     /// Adds a task from its text alone — the common case.
-    pub fn add_text(&mut self, text: impl Into<String>) -> String {
+    pub fn add_text(&mut self, text: impl Into<String>) -> usize {
         self.add(Task::new(text))
+    }
+
+    /// Adds a task and gives it an id immediately, for callers that need to
+    /// reference it right away — a state entry, a move between lists.
+    ///
+    /// Prefer plain [`TaskList::add_text`] when the id is not needed: an
+    /// unreferenced task is better off without a comment on its line.
+    pub fn add_text_with_id(&mut self, text: impl Into<String>) -> String {
+        let position = self.add_text(text);
+        self.ensure_id_at(position)
+            .expect("the task was just added at this position")
+    }
+
+    /// Line index of the task at `position` among the tasks.
+    fn line_of_task(&self, position: usize) -> Option<usize> {
+        self.lines
+            .iter()
+            .enumerate()
+            .filter(|(_, line)| matches!(line, Line::Task(_)))
+            .nth(position)
+            .map(|(index, _)| index)
+    }
+
+    /// Gives the task at `position` an id, if it does not have one, and
+    /// returns it.
+    ///
+    /// This is the doorway to every operation that addresses a task: pulling
+    /// it into a period, completing it, referring to it from anywhere. Reading
+    /// a list never calls this, which is what keeps untouched files clean.
+    pub fn ensure_id_at(&mut self, position: usize) -> Option<String> {
+        let at = self.line_of_task(position)?;
+        let taken = self.taken_ids();
+
+        let Line::Task(task) = &mut self.lines[at] else {
+            return None;
+        };
+        if task.id.is_none() {
+            task.id = Some(id::generate_unique(&taken));
+        }
+        task.id.clone()
     }
 
     /// Replaces the text of an existing task, leaving everything else alone.
@@ -138,6 +206,43 @@ impl TaskList {
             .ok_or_else(|| Error::TaskNotFound(id.to_string()))?;
         if let Line::Task(task) = &mut self.lines[at] {
             task.done = done;
+        }
+        Ok(())
+    }
+
+    /// Hands out a mutable task, for callers that need to change more than
+    /// its text — dates, tags, priority, description, subtasks.
+    pub fn task_mut(&mut self, id: &str) -> Result<&mut Task> {
+        let at = self
+            .position_of(id)
+            .ok_or_else(|| Error::TaskNotFound(id.to_string()))?;
+        match &mut self.lines[at] {
+            Line::Task(task) => Ok(task),
+            Line::Raw(_) => unreachable!("position_of only matches task lines"),
+        }
+    }
+
+    /// Moves the task at `from` (counting tasks, not lines) to position `to`.
+    ///
+    /// The order of tasks in the file is the order the user sees, so dragging
+    /// a task in the app rewrites the file — there is no separate ordering to
+    /// keep in sync.
+    pub fn move_task_to(&mut self, from: usize, to: usize) -> Result<()> {
+        let count = self.tasks().count();
+        if from >= count || to >= count {
+            return Err(Error::TaskNotFound(format!("position {from} -> {to}")));
+        }
+        if from == to {
+            return Ok(());
+        }
+
+        let from_line = self.line_of_task(from).expect("checked above");
+        let line = self.lines.remove(from_line);
+
+        // After removing, positions shift: recompute against the new list.
+        match self.line_of_task(to) {
+            Some(target) => self.lines.insert(target, line),
+            None => self.lines.push(line),
         }
         Ok(())
     }
@@ -171,35 +276,28 @@ impl TaskList {
         changed
     }
 
-    /// Makes every task in the file addressable: one id each, all distinct.
+    /// Gives a fresh id to any task whose id repeats one already used earlier
+    /// in the file. Tasks without an id are left without one.
     ///
-    /// Two cases, both of them normal for a file people edit by hand:
-    ///
-    /// - **no id** — a checkbox typed in Obsidian. It gets one.
-    /// - **repeated id** — a line copy-pasted, duplicating the comment along
-    ///   with it. The later copy gets a fresh id.
-    ///
-    /// A repeated id is worse than a missing one: `find`, `edit_text`,
-    /// `remove` and `set_done` all address the first match, so the second copy
-    /// silently cannot be edited or completed, and every reference pointing at
-    /// that id becomes ambiguous.
+    /// Duplicated ids happen when a line is copy-pasted in an editor, comment
+    /// and all. They are worse than missing ids: `find`, `edit_text`, `remove`
+    /// and `set_done` all address the first match, so the second copy silently
+    /// cannot be edited or completed, and any reference to that id becomes
+    /// ambiguous.
     ///
     /// The first occurrence always keeps the id, so references already stored
     /// in a day/week state keep pointing at the same task.
     ///
     /// Returns how many lines changed, so the caller can skip a pointless save.
-    pub fn ensure_unique_ids(&mut self) -> usize {
+    pub fn dedupe_ids(&mut self) -> usize {
         let mut seen: HashSet<String> = HashSet::new();
         let mut changed = 0;
 
         for line in &mut self.lines {
             let Line::Task(task) = line else { continue };
+            let Some(id) = task.id.clone() else { continue };
 
-            let needs_id = match &task.id {
-                None => true,
-                Some(id) => !seen.insert(id.clone()),
-            };
-            if needs_id {
+            if !seen.insert(id) {
                 let new_id = id::generate_unique(&seen);
                 seen.insert(new_id.clone());
                 task.id = Some(new_id);
@@ -210,16 +308,15 @@ impl TaskList {
     }
 
     pub fn render(&self) -> String {
-        let mut out = String::new();
-        for (i, line) in self.lines.iter().enumerate() {
-            if i > 0 {
-                out.push('\n');
-            }
+        let mut rendered: Vec<String> = Vec::new();
+        for line in &self.lines {
             match line {
-                Line::Task(task) => out.push_str(&task.render()),
-                Line::Raw(raw) => out.push_str(raw),
+                Line::Task(task) => rendered.extend(task.render()),
+                Line::Raw(raw) => rendered.push(raw.clone()),
             }
         }
+
+        let mut out = rendered.join("\n");
         if self.trailing_newline && !out.is_empty() {
             out.push('\n');
         }

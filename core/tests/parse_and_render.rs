@@ -51,7 +51,7 @@ fn accepts_uppercase_x_and_other_bullet_markers() {
 fn preserves_indentation_of_nested_tasks() {
     let task = Task::parse("    - [ ] subtarefa <!--id:aaa111-->").unwrap();
     assert_eq!(task.indent, "    ");
-    assert_eq!(task.render(), "    - [ ] subtarefa <!--id:aaa111-->");
+    assert_eq!(task.render_block(), "    - [ ] subtarefa <!--id:aaa111-->");
 }
 
 #[test]
@@ -91,7 +91,7 @@ fn malformed_meta_does_not_break_the_line() {
 fn render_round_trips_every_field() {
     let original = r#"- [x] Pagar internet <!--id:d4e5f6 origin:Compras meta:{"n":1}-->"#;
     let task = Task::parse(original).unwrap();
-    assert_eq!(task.render(), original);
+    assert_eq!(task.render_block(), original);
 }
 
 #[test]

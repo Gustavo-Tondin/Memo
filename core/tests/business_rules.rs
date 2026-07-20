@@ -18,7 +18,7 @@ fn read(path: impl AsRef<Path>) -> String {
 fn notebook_with_task(dir: &Path, text: &str) -> (Notebook, String) {
     let notebook = Notebook::init(dir).unwrap();
     let mut inbox = notebook.inbox().unwrap();
-    let id = inbox.add_text(text);
+    let id = inbox.add_text_with_id(text);
     inbox.save().unwrap();
     (notebook, id)
 }
@@ -32,7 +32,7 @@ fn completing_moves_the_task_to_completed_with_its_origin() {
     notebook.create_list("Compras").unwrap();
 
     let mut compras = notebook.open_list("Compras").unwrap();
-    let id = compras.add_text("Comprar leite");
+    let id = compras.add_text_with_id("Comprar leite");
     compras.save().unwrap();
 
     let task = notebook.complete_task("Compras", &id).unwrap();
@@ -70,7 +70,7 @@ fn undoing_sends_the_task_back_to_its_origin_list() {
     notebook.create_list("Compras").unwrap();
 
     let mut compras = notebook.open_list("Compras").unwrap();
-    let id = compras.add_text("Comprar leite");
+    let id = compras.add_text_with_id("Comprar leite");
     compras.save().unwrap();
 
     notebook.complete_task("Compras", &id).unwrap();
@@ -91,7 +91,7 @@ fn undoing_recreates_an_origin_list_that_was_deleted_outside_the_app() {
     notebook.create_list("Compras").unwrap();
 
     let mut compras = notebook.open_list("Compras").unwrap();
-    let id = compras.add_text("Comprar leite");
+    let id = compras.add_text_with_id("Comprar leite");
     compras.save().unwrap();
     notebook.complete_task("Compras", &id).unwrap();
 
@@ -131,27 +131,26 @@ fn undoing_an_unknown_id_fails_without_touching_anything() {
 // ----------------------------------------------------------------- reading
 
 #[test]
-fn reading_a_list_adopts_checkboxes_written_by_hand() {
-    // Someone adds a line in Obsidian; without an id the app could not act on
-    // it, so reading the list is what adopts it.
+fn reading_a_hand_written_list_leaves_the_file_exactly_as_it_was() {
+    // Changed in 2026-07-20: reading used to stamp an id on every task, which
+    // put a comment on lines the user never asked about. Now the id arrives
+    // only when something needs to address the task.
     let dir = tempfile::tempdir().unwrap();
     let notebook = Notebook::init(dir.path()).unwrap();
-    std::fs::write(
-        dir.path().join("Tasks/Inbox.md"),
-        "# Minha lista\n\n- [ ] escrita no Obsidian\n",
-    )
-    .unwrap();
+    let original = "# Minha lista\n\n- [ ] escrita no Obsidian\n";
+    std::fs::write(dir.path().join("Tasks/Inbox.md"), original).unwrap();
 
     let tasks = notebook.tasks_in("Inbox").unwrap();
     assert_eq!(tasks.len(), 1);
-    let id = tasks[0].id.clone().expect("id assigned on read");
+    assert_eq!(tasks[0].id, None);
+    assert_eq!(read(dir.path().join("Tasks/Inbox.md")), original);
 
-    // Persisted, and the heading the user wrote is still there.
+    // Acting on it is what makes it addressable — and the heading survives.
+    let id = notebook.ensure_task_id("Inbox", 0).unwrap();
     let on_disk = read(dir.path().join("Tasks/Inbox.md"));
     assert!(on_disk.contains(&format!("id:{id}")));
     assert!(on_disk.contains("# Minha lista"));
 
-    // And the task is now actionable.
     notebook.complete_task("Inbox", &id).unwrap();
 }
 
@@ -280,8 +279,8 @@ fn renaming_a_list_repoints_completed_origins_and_states() {
     notebook.create_list("Compras").unwrap();
 
     let mut compras = notebook.open_list("Compras").unwrap();
-    let done_id = compras.add_text("Comprar leite");
-    let pulled_id = compras.add_text("Comprar pão");
+    let done_id = compras.add_text_with_id("Comprar leite");
+    let pulled_id = compras.add_text_with_id("Comprar pão");
     compras.save().unwrap();
 
     notebook.complete_task("Compras", &done_id).unwrap();
@@ -338,7 +337,7 @@ fn deleting_a_list_rescues_its_tasks_into_the_inbox() {
     notebook.create_list("Compras").unwrap();
 
     let mut compras = notebook.open_list("Compras").unwrap();
-    let id = compras.add_text("Comprar leite");
+    let id = compras.add_text_with_id("Comprar leite");
     compras.add_text("Comprar pão");
     compras.save().unwrap();
     notebook.pull_into(Period::Day, "Compras", &id).unwrap();
@@ -355,6 +354,29 @@ fn deleting_a_list_rescues_its_tasks_into_the_inbox() {
     // A task that was pulled into Today stays pulled, now via the Inbox.
     let state = notebook.open_state(Period::Day).unwrap();
     assert!(state.state.contains("Inbox", &id));
+}
+
+#[test]
+fn deleting_a_list_rescues_tasks_that_never_earned_an_id() {
+    // Caught while making ids lazy: the rescue used to iterate over ids, so
+    // every task without one — which is now most of them — was deleted with
+    // the file.
+    let dir = tempfile::tempdir().unwrap();
+    let notebook = Notebook::init(dir.path()).unwrap();
+    notebook.create_list("Compras").unwrap();
+    std::fs::write(
+        dir.path().join("Tasks/Compras.md"),
+        "- [ ] sem id nenhum\n  @2026-07-25 #casa\n- [ ] outra sem id\n",
+    )
+    .unwrap();
+
+    let rescued = notebook.delete_list("Compras").unwrap();
+
+    assert_eq!(rescued, 2);
+    let inbox = read(dir.path().join("Tasks/Inbox.md"));
+    assert!(inbox.contains("sem id nenhum"));
+    assert!(inbox.contains("outra sem id"));
+    assert!(inbox.contains("@2026-07-25 #casa"), "campos vêm junto");
 }
 
 #[test]
@@ -489,11 +511,11 @@ fn the_day_suggests_the_week_first_then_the_other_lists() {
     notebook.create_list("Compras").unwrap();
 
     let mut inbox = notebook.inbox().unwrap();
-    let solta = inbox.add_text("Tarefa solta");
+    let solta = inbox.add_text_with_id("Tarefa solta");
     inbox.save().unwrap();
 
     let mut compras = notebook.open_list("Compras").unwrap();
-    let da_semana = compras.add_text("Escolhida pra semana");
+    let da_semana = compras.add_text_with_id("Escolhida pra semana");
     compras.save().unwrap();
 
     notebook
@@ -553,7 +575,7 @@ fn period_tasks_resolves_references_to_real_tasks() {
     notebook.create_list("Compras").unwrap();
 
     let mut compras = notebook.open_list("Compras").unwrap();
-    let id = compras.add_text("Comprar leite");
+    let id = compras.add_text_with_id("Comprar leite");
     compras.save().unwrap();
     notebook.pull_into(Period::Day, "Compras", &id).unwrap();
 
@@ -576,6 +598,163 @@ fn a_reference_to_a_task_deleted_elsewhere_is_skipped() {
     assert!(notebook.period_tasks(Period::Day).unwrap().is_empty());
 }
 
+// ------------------------------------------------------ urgência e grupos
+
+/// Writes a list where dates are relative to today, so the test does not go
+/// stale when the calendar moves.
+fn write_dated_list(dir: &Path, list: &str, entries: &[(&str, i64)]) {
+    let today = chrono::Local::now().date_naive();
+    let body: String = entries
+        .iter()
+        .map(|(text, offset)| {
+            let due = today + chrono::Duration::days(*offset);
+            format!("- [ ] {text}\n  @{due}\n")
+        })
+        .collect();
+    std::fs::write(dir.join("Tasks").join(format!("{list}.md")), body).unwrap();
+}
+
+#[test]
+fn suggestions_come_grouped_by_why_they_are_offered() {
+    use memo_core::notebook::SuggestionGroup;
+
+    let dir = tempfile::tempdir().unwrap();
+    let notebook = Notebook::init(dir.path()).unwrap();
+    write_dated_list(
+        dir.path(),
+        "Inbox",
+        &[
+            ("Bem no futuro", 30),
+            ("Vencida ontem", -1),
+            ("Daqui a dois dias", 2),
+            ("Para hoje", 0),
+        ],
+    );
+
+    let suggestions = notebook.grouped_suggestions(Period::Day).unwrap();
+    let by_text = |text: &str| {
+        suggestions
+            .iter()
+            .find(|s| s.task.text == text)
+            .unwrap_or_else(|| panic!("{text} não sugerida"))
+            .group
+    };
+
+    assert_eq!(by_text("Vencida ontem"), SuggestionGroup::Urgent);
+    assert_eq!(by_text("Para hoje"), SuggestionGroup::Urgent);
+    assert_eq!(by_text("Daqui a dois dias"), SuggestionGroup::Soon);
+    assert_eq!(by_text("Bem no futuro"), SuggestionGroup::Lists);
+
+    // And the urgent ones really come first on screen.
+    assert_eq!(suggestions[0].group, SuggestionGroup::Urgent);
+    assert!(
+        suggestions.windows(2).all(|w| w[0].group <= w[1].group),
+        "grupos fora de ordem: {:?}",
+        suggestions.iter().map(|s| s.group).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn the_urgent_tag_counts_as_much_as_a_date() {
+    use memo_core::notebook::SuggestionGroup;
+
+    let dir = tempfile::tempdir().unwrap();
+    let notebook = Notebook::init(dir.path()).unwrap();
+    std::fs::write(
+        dir.path().join("Tasks/Inbox.md"),
+        "- [ ] Sem data, mas urgente\n  #urgent\n",
+    )
+    .unwrap();
+
+    let suggestions = notebook.grouped_suggestions(Period::Day).unwrap();
+    assert_eq!(suggestions[0].group, SuggestionGroup::Urgent);
+}
+
+#[test]
+fn the_automatic_urgency_can_be_switched_off() {
+    // For people who do not want the interface flagging deadlines on its own.
+    use memo_core::notebook::SuggestionGroup;
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut notebook = Notebook::init(dir.path()).unwrap();
+    write_dated_list(dir.path(), "Inbox", &[("Vencida ontem", -1)]);
+
+    let mut config = notebook.config().clone();
+    config.auto_urgent_by_date = false;
+    notebook.set_config(config).unwrap();
+
+    let suggestions = notebook.grouped_suggestions(Period::Day).unwrap();
+    assert_ne!(
+        suggestions[0].group,
+        SuggestionGroup::Urgent,
+        "a data não deve marcar sozinha quando a opção está desligada"
+    );
+
+    // The hand-written tag still counts.
+    std::fs::write(
+        dir.path().join("Tasks/Inbox.md"),
+        "- [ ] Vencida ontem\n  #urgent\n",
+    )
+    .unwrap();
+    let suggestions = notebook.grouped_suggestions(Period::Day).unwrap();
+    assert_eq!(suggestions[0].group, SuggestionGroup::Urgent);
+}
+
+#[test]
+fn a_date_never_pulls_a_task_into_the_day_by_itself() {
+    // The product decision this protects: the day is a deliberate choice.
+    let dir = tempfile::tempdir().unwrap();
+    let notebook = Notebook::init(dir.path()).unwrap();
+    write_dated_list(dir.path(), "Inbox", &[("Vencida ontem", -1)]);
+
+    assert!(
+        notebook.open_state(Period::Day).unwrap().state.is_empty(),
+        "nada entra no dia sem o usuário mandar"
+    );
+    assert_eq!(notebook.grouped_suggestions(Period::Day).unwrap().len(), 1);
+}
+
+// ----------------------------------------------------------- recorrência
+
+#[test]
+fn completing_a_repeating_task_leaves_the_next_one_behind() {
+    let dir = tempfile::tempdir().unwrap();
+    let notebook = Notebook::init(dir.path()).unwrap();
+    std::fs::write(
+        dir.path().join("Tasks/Inbox.md"),
+        "- [ ] Pagar aluguel <!--id:rent01-->\n  @2026-07-01 #casa\n  repeat: every-month\n",
+    )
+    .unwrap();
+
+    notebook.complete_task("Inbox", "rent01").unwrap();
+
+    // The finished one moved out, with its date and tag intact...
+    let completed = read(dir.path().join("Tasks/Completed.md"));
+    assert!(completed.contains("- [x] Pagar aluguel"));
+    assert!(completed.contains("@2026-07-01"));
+
+    // ...and next month's is waiting, anchored on the 1st, not on today.
+    let inbox = read(dir.path().join("Tasks/Inbox.md"));
+    assert!(inbox.contains("- [ ] Pagar aluguel"), "inbox:\n{inbox}");
+    assert!(inbox.contains("@2026-08-01"), "inbox:\n{inbox}");
+    assert!(inbox.contains("#casa"));
+    assert!(inbox.contains("repeat: every-month"));
+    assert!(
+        !inbox.contains("id:"),
+        "a new occurrence was never referenced, so it needs no id"
+    );
+}
+
+#[test]
+fn completing_a_normal_task_leaves_nothing_behind() {
+    let dir = tempfile::tempdir().unwrap();
+    let (notebook, id) = notebook_with_task(dir.path(), "Comprar leite");
+
+    notebook.complete_task("Inbox", &id).unwrap();
+
+    assert!(notebook.tasks_in("Inbox").unwrap().is_empty());
+}
+
 // ------------------------------------------------------------- contagem
 
 #[test]
@@ -586,7 +765,7 @@ fn counts_only_the_open_tasks_of_each_list() {
 
     let mut compras = notebook.open_list("Compras").unwrap();
     compras.add_text("Comprar leite");
-    let done = compras.add_text("Comprar pão");
+    let done = compras.add_text_with_id("Comprar pão");
     compras.save().unwrap();
     notebook.complete_task("Compras", &done).unwrap();
 
@@ -750,7 +929,7 @@ fn the_whole_phase_two_scenario_end_to_end() {
     notebook.create_list("Compras").unwrap();
 
     let mut compras = notebook.open_list("Compras").unwrap();
-    let id = compras.add_text("Comprar leite");
+    let id = compras.add_text_with_id("Comprar leite");
     compras.save().unwrap();
 
     notebook.pull_into(Period::Week, "Compras", &id).unwrap();

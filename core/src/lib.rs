@@ -13,6 +13,7 @@ pub mod error;
 pub mod id;
 pub mod list;
 pub mod notebook;
+pub mod recurrence;
 pub mod rollover;
 pub mod state;
 pub mod task;
