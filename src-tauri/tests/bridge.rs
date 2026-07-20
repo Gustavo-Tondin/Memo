@@ -314,6 +314,43 @@ fn refresh_periods_returns_both_states() {
     assert!(states[1]["items"].is_array());
 }
 
+/// Guards a bug that no IPC test can catch: a native dialog cannot be driven
+/// from a test, so the only thing standing between us and a frozen window is
+/// this rule.
+///
+/// A synchronous `#[tauri::command]` runs on the main thread, and the plugin's
+/// `blocking_*` helpers explicitly must not. The combination locks the GTK
+/// event loop the instant the dialog opens — which is exactly what happened
+/// the first time this command shipped.
+#[test]
+fn dialog_helpers_are_never_called_from_a_blocking_command() {
+    let source = include_str!("../src/commands.rs");
+
+    for (number, line) in source.lines().enumerate() {
+        let code = line.trim();
+        // Comments may name it — the docs on the command explain the trap.
+        if code.starts_with("//") {
+            continue;
+        }
+        assert!(
+            !code.contains("blocking_pick"),
+            "commands.rs:{}: blocking_pick_* freezes the window; use the \
+             callback form inside an async command instead",
+            number + 1
+        );
+    }
+
+    // And the command that opens the picker must stay async.
+    let picker = source
+        .split("pub async fn pick_notebook_folder")
+        .count();
+    assert_eq!(
+        picker, 2,
+        "pick_notebook_folder must be an async command — a sync one runs on \
+         the main thread and freezes the dialog"
+    );
+}
+
 #[test]
 fn the_day_offers_the_week_first_then_the_rest() {
     let (app, _dir) = app_with_notebook();

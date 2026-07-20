@@ -62,11 +62,31 @@ pub fn core_version() -> String {
 // --------------------------------------------------------------- notebook
 
 /// Opens the native folder picker. `None` when the user cancels.
+///
+/// Two things here are not optional, and getting either wrong freezes the
+/// window the moment the dialog opens:
+///
+/// 1. **The command must be `async`.** A synchronous `#[tauri::command]` runs
+///    on the main thread, which is the same thread that drives the GTK event
+///    loop — and therefore the dialog itself.
+/// 2. **The callback form, not `blocking_pick_folder`.** The plugin is
+///    explicit that the blocking variants must never run on the main thread.
+///    Waiting for the answer on a blocking-pool thread keeps the main thread
+///    free to actually draw the dialog, whatever thread Tauri picks for the
+///    command in the future.
 #[tauri::command]
-pub fn pick_notebook_folder<R: Runtime>(app: AppHandle<R>) -> Option<PathBuf> {
-    app.dialog()
-        .file()
-        .blocking_pick_folder()
+pub async fn pick_notebook_folder<R: Runtime>(app: AppHandle<R>) -> Option<PathBuf> {
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    // Fires on the main thread when the user answers; sending never blocks.
+    app.dialog().file().pick_folder(move |folder| {
+        let _ = tx.send(folder);
+    });
+
+    tauri::async_runtime::spawn_blocking(move || rx.recv().ok().flatten())
+        .await
+        .ok()
+        .flatten()
         .and_then(|folder| folder.into_path().ok())
 }
 
