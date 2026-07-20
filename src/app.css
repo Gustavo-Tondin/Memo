@@ -1,0 +1,15 @@
+/* Bare minimum for now: the real design comes once the app is fully
+   functional. Logic first, looks later. */
+
+:root {
+  font-family: system-ui, sans-serif;
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  padding: 21px;
+}
