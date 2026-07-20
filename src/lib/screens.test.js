@@ -105,6 +105,23 @@ describe("ListView", () => {
     );
   });
 
+  test("duplicated ids still render every line", async () => {
+    // The core de-duplicates ids on read, but not on a read-only notebook —
+    // and a duplicate key makes Svelte abort the whole list, which showed up
+    // as an empty Inbox while the same task still appeared under Today.
+    bridge({
+      list_tasks: [task("abc123", "Comprar leite"), task("abc123", "Comprar leite")],
+    });
+
+    render(ListView, {
+      props: { list: "Inbox", readOnly: true, onChanged: noop, onError: noop, reloadKey: 0 },
+    });
+
+    await waitFor(() =>
+      expect(screen.getAllByText("Comprar leite").length).toBe(2),
+    );
+  });
+
   test("a read-only notebook offers no way to add tasks", async () => {
     bridge({ list_tasks: [task("a1", "Comprar leite")] });
 

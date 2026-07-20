@@ -156,6 +156,99 @@ fn reading_a_list_adopts_checkboxes_written_by_hand() {
 }
 
 #[test]
+fn a_line_copy_pasted_with_its_id_gets_a_fresh_one() {
+    // Reported from real use: duplicating a line in the editor duplicates the
+    // id comment too, and then the second copy cannot be addressed at all.
+    let dir = tempfile::tempdir().unwrap();
+    let notebook = Notebook::init(dir.path()).unwrap();
+    std::fs::write(
+        dir.path().join("Tarefas/Inbox.md"),
+        "- [ ] Comprar leite <!--id:abc123-->\n- [ ] Comprar leite <!--id:abc123-->\n",
+    )
+    .unwrap();
+
+    let tasks = notebook.tasks_in("Inbox").unwrap();
+
+    assert_eq!(tasks.len(), 2, "both lines must survive");
+    let first = tasks[0].id.clone().unwrap();
+    let second = tasks[1].id.clone().unwrap();
+    assert_eq!(first, "abc123", "the first copy keeps the id");
+    assert_ne!(second, first, "the second copy gets its own");
+
+    // Both are now independently addressable.
+    notebook.complete_task("Inbox", &second).unwrap();
+    let left = notebook.tasks_in("Inbox").unwrap();
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0].id.as_deref(), Some(first.as_str()));
+}
+
+#[test]
+fn a_reference_keeps_pointing_at_the_task_it_was_created_for() {
+    // The exact sequence that surfaced the bug: pull a task into the day,
+    // then duplicate its line by hand.
+    let dir = tempfile::tempdir().unwrap();
+    let (notebook, id) = notebook_with_task(dir.path(), "Comprar leite");
+    notebook.pull_into(Period::Day, "Inbox", &id).unwrap();
+
+    let line = format!("- [ ] Comprar leite <!--id:{id}-->");
+    std::fs::write(
+        dir.path().join("Tarefas/Inbox.md"),
+        format!("{line}\n{line}\n"),
+    )
+    .unwrap();
+
+    let tasks = notebook.tasks_in("Inbox").unwrap();
+    assert_eq!(tasks.len(), 2);
+    assert_eq!(
+        tasks[0].id.as_deref(),
+        Some(id.as_str()),
+        "the first line keeps the id so the day's reference stays valid"
+    );
+
+    let pulled = notebook.period_tasks(Period::Day).unwrap();
+    assert_eq!(pulled.len(), 1, "the reference must not become ambiguous");
+    assert_eq!(pulled[0].task.id.as_deref(), Some(id.as_str()));
+}
+
+#[test]
+fn moving_a_task_into_a_list_that_already_uses_its_id() {
+    // Ids are unique per file, so two lists can legitimately hold the same
+    // one. Completing both must not merge them into a single line.
+    let dir = tempfile::tempdir().unwrap();
+    let notebook = Notebook::init(dir.path()).unwrap();
+    notebook.create_list("Compras").unwrap();
+
+    std::fs::write(
+        dir.path().join("Tarefas/Inbox.md"),
+        "- [ ] Da Inbox <!--id:mesmo1-->\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("Tarefas/Compras.md"),
+        "- [ ] De Compras <!--id:mesmo1-->\n",
+    )
+    .unwrap();
+
+    notebook.complete_task("Inbox", "mesmo1").unwrap();
+    notebook.complete_task("Compras", "mesmo1").unwrap();
+
+    let completed = notebook.tasks_in("Completas").unwrap();
+    assert_eq!(completed.len(), 2, "neither task may be swallowed");
+
+    let ids: std::collections::HashSet<_> =
+        completed.iter().map(|t| t.id.clone().unwrap()).collect();
+    assert_eq!(ids.len(), 2, "ids inside one file must be distinct");
+
+    // And each still knows where to go back to.
+    let origins: std::collections::HashSet<_> =
+        completed.iter().map(|t| t.origin.clone().unwrap()).collect();
+    assert_eq!(
+        origins,
+        ["Inbox".to_string(), "Compras".to_string()].into_iter().collect()
+    );
+}
+
+#[test]
 fn reading_a_read_only_notebook_does_not_adopt_ids() {
     let dir = tempfile::tempdir().unwrap();
     Notebook::init(dir.path()).unwrap();

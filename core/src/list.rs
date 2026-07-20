@@ -97,11 +97,18 @@ impl TaskList {
         self.tasks().filter_map(|t| t.id.clone()).collect()
     }
 
-    /// Appends a task, assigning an id if it has none. Returns the id.
+    /// Appends a task, assigning an id if it has none — or if the one it
+    /// carries is already taken in this file. Returns the id it ended up with.
+    ///
+    /// Ids are unique per file, not globally, so moving a task between lists
+    /// can collide with a task that already lives in the destination. Keeping
+    /// the incoming id in that case would create two lines that every lookup
+    /// confuses for one another.
     pub fn add(&mut self, mut task: Task) -> String {
+        let taken = self.taken_ids();
         let id = match task.id.take() {
-            Some(id) => id,
-            None => id::generate_unique(&self.taken_ids()),
+            Some(id) if !taken.contains(&id) => id,
+            _ => id::generate_unique(&taken),
         };
         task.id = Some(id.clone());
         self.lines.push(Line::Task(task));
@@ -164,22 +171,42 @@ impl TaskList {
         changed
     }
 
-    /// Gives an id to every task typed by hand outside the app. Returns how
-    /// many were adopted, so the caller can skip saving when nothing changed.
-    pub fn ensure_ids(&mut self) -> usize {
-        let mut taken = self.taken_ids();
-        let mut adopted = 0;
+    /// Makes every task in the file addressable: one id each, all distinct.
+    ///
+    /// Two cases, both of them normal for a file people edit by hand:
+    ///
+    /// - **no id** — a checkbox typed in Obsidian. It gets one.
+    /// - **repeated id** — a line copy-pasted, duplicating the comment along
+    ///   with it. The later copy gets a fresh id.
+    ///
+    /// A repeated id is worse than a missing one: `find`, `edit_text`,
+    /// `remove` and `set_done` all address the first match, so the second copy
+    /// silently cannot be edited or completed, and every reference pointing at
+    /// that id becomes ambiguous.
+    ///
+    /// The first occurrence always keeps the id, so references already stored
+    /// in a day/week state keep pointing at the same task.
+    ///
+    /// Returns how many lines changed, so the caller can skip a pointless save.
+    pub fn ensure_unique_ids(&mut self) -> usize {
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut changed = 0;
+
         for line in &mut self.lines {
-            if let Line::Task(task) = line {
-                if task.id.is_none() {
-                    let new_id = id::generate_unique(&taken);
-                    taken.insert(new_id.clone());
-                    task.id = Some(new_id);
-                    adopted += 1;
-                }
+            let Line::Task(task) = line else { continue };
+
+            let needs_id = match &task.id {
+                None => true,
+                Some(id) => !seen.insert(id.clone()),
+            };
+            if needs_id {
+                let new_id = id::generate_unique(&seen);
+                seen.insert(new_id.clone());
+                task.id = Some(new_id);
+                changed += 1;
             }
         }
-        adopted
+        changed
     }
 
     pub fn render(&self) -> String {

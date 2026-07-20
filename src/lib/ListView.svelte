@@ -58,7 +58,10 @@
   <p class="empty">Nenhuma tarefa nesta lista.</p>
 {:else}
   <ul>
-    {#each tasks as task (task.id ?? task.text)}
+    <!-- Keyed by position as well as id: a duplicated id would otherwise be a
+         duplicate key, and Svelte aborts rendering the whole list. A read-only
+         notebook never gets its ids de-duplicated, so this can still happen. -->
+    {#each tasks as task, i (`${task.id ?? ""}#${i}`)}
       <TaskRow {task} {list} onComplete={complete} onEdit={edit}>
         <button onclick={() => pull("day", task.id)}>→ Hoje</button>
         <button onclick={() => pull("week", task.id)}>→ Semana</button>

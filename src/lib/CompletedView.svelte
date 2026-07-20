@@ -37,7 +37,9 @@
   <p class="empty">Nada concluído ainda.</p>
 {:else}
   <ul>
-    {#each tasks as task (task.id ?? task.text)}
+    <!-- See ListView: position is part of the key so a duplicated id cannot
+         take the whole screen down. -->
+    {#each tasks as task, i (`${task.id ?? ""}#${i}`)}
       <li>
         <input
           type="checkbox"

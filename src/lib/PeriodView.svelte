@@ -69,7 +69,7 @@
   <p class="empty">Nada escolhido ainda. Puxe algo das sugestões abaixo.</p>
 {:else}
   <ul>
-    {#each pulled as entry (entry.list + entry.task.id)}
+    {#each pulled as entry, i (`${entry.list}/${entry.task.id ?? ""}#${i}`)}
       <TaskRow
         task={entry.task}
         list={entry.list}
@@ -88,7 +88,7 @@
   <p class="empty">Nenhuma tarefa disponível.</p>
 {:else}
   <ul>
-    {#each suggestions as entry (entry.list + entry.task.id)}
+    {#each suggestions as entry, i (`${entry.list}/${entry.task.id ?? ""}#${i}`)}
       <li>
         <span>{entry.task.text}</span>
         <small>{entry.list}</small>

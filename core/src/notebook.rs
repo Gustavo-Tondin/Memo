@@ -214,7 +214,7 @@ impl Notebook {
     /// notebook is shown as-is instead — adopting would be a write.
     pub fn tasks_in(&self, list: &str) -> Result<Vec<Task>> {
         let mut tasks = self.open_list(list)?;
-        if !self.is_read_only() && tasks.ensure_ids() > 0 {
+        if !self.is_read_only() && tasks.ensure_unique_ids() > 0 {
             tasks.save()?;
         }
         Ok(tasks.tasks().cloned().collect())

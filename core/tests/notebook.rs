@@ -241,7 +241,7 @@ fn tasks_written_by_hand_are_adopted_with_ids() {
     .unwrap();
 
     let mut inbox = TaskList::load(&inbox_path).unwrap();
-    assert_eq!(inbox.ensure_ids(), 1, "should adopt exactly one task");
+    assert_eq!(inbox.ensure_unique_ids(), 1, "should adopt exactly one task");
     inbox.save().unwrap();
 
     let inbox = TaskList::load(&inbox_path).unwrap();
