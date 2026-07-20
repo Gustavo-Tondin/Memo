@@ -3,16 +3,20 @@
 //! Layout:
 //!
 //! ```text
-//! MeuCaderno/
+//! MyNotebook/
 //! ├── .memo/
 //! │   ├── config.json
 //! │   ├── daily-state.json
 //! │   └── weekly-state.json
-//! ├── Tarefas/
+//! ├── Tasks/
+//! │   ├── _FORMAT.txt
 //! │   ├── Inbox.md
-//! │   └── Completas.md
-//! └── Notas/
+//! │   └── Completed.md
+//! └── Notes/
 //! ```
+//!
+//! A notebook created before 2026-07-20 uses the Portuguese names and is
+//! migrated on open — see [`Notebook::migrate_legacy_names`].
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
