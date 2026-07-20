@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use memo_core::config::{Config, RolloverMode};
 use memo_core::state::{Period, PeriodState};
-use memo_core::{ListedTask, Notebook, Task, TurnOffset, WeekStart};
+use memo_core::{Conflict, ListedTask, Notebook, Task, TurnOffset, WeekStart};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Runtime, State};
 use tauri_plugin_dialog::DialogExt;
@@ -44,14 +44,25 @@ impl NotebookInfo {
 }
 
 /// The notebook preferences, flattened for the UI.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RolloverSettings {
-    pub daily_mode: String,
-    pub daily_at: String,
-    pub weekly_mode: String,
-    pub weekly_at: String,
-    pub week_starts_on: String,
+///
+/// Every field is a plain string or bool: the frontend should not have to know
+/// the core's types, and a value it cannot parse still round-trips.
+///
+/// Everything is optional on the way **in**: a missing field keeps whatever is
+/// stored, instead of failing the whole call. Otherwise adding a preference
+/// here would break every caller that does not know about it yet — including
+/// an older frontend against a newer shell. On the way **out** all fields are
+/// filled.
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct NotebookSettings {
+    pub daily_mode: Option<String>,
+    pub daily_at: Option<String>,
+    pub weekly_mode: Option<String>,
+    pub weekly_at: Option<String>,
+    pub week_starts_on: Option<String>,
+    pub restore_last_screen: Option<bool>,
+    pub show_list_counts: Option<bool>,
 }
 
 #[tauri::command]
@@ -121,16 +132,67 @@ pub fn current_notebook(state: State<'_, AppState>) -> Option<NotebookInfo> {
     state.with_notebook(|nb| NotebookInfo::of(nb)).ok()
 }
 
+/// Open task count per list, for the navigation. Empty when the user turned
+/// the counters off — the frontend does not need to know the rule.
 #[tauri::command]
-pub fn notebook_settings(state: State<'_, AppState>) -> CommandResult<RolloverSettings> {
+pub fn list_counts(
+    state: State<'_, AppState>,
+) -> CommandResult<std::collections::BTreeMap<String, usize>> {
     state.with_notebook(|nb| {
-        let rollover = nb.config().rollover;
-        Ok(RolloverSettings {
-            daily_mode: rollover.daily.mode.render().to_string(),
-            daily_at: rollover.daily.at.render(),
-            weekly_mode: rollover.weekly.mode.render().to_string(),
-            weekly_at: rollover.weekly.at.render(),
-            week_starts_on: rollover.weekly.starts_on.render().to_string(),
+        if !nb.config().show_list_counts {
+            return Ok(Default::default());
+        }
+        Ok(nb.open_task_counts()?)
+    })
+}
+
+/// Which screen to open on launch.
+///
+/// `None` means "use the default" — either the user never left one, or the
+/// notebook has `restoreLastScreen` off. The value itself is machine-local;
+/// the preference to use it travels with the notebook.
+#[tauri::command]
+pub fn screen_to_restore<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppState>,
+) -> CommandResult<Option<String>> {
+    state.with_notebook(|nb| {
+        if !nb.config().restore_last_screen {
+            return Ok(None);
+        }
+        Ok(crate::prefs::last_screen(&app))
+    })
+}
+
+/// Records the current screen. No-op when the notebook has the preference off,
+/// so turning it on later does not restore a screen from months ago.
+#[tauri::command]
+pub fn remember_screen<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppState>,
+    screen: String,
+) -> CommandResult<()> {
+    state.with_notebook(|nb| {
+        if nb.config().restore_last_screen {
+            crate::prefs::remember_screen(&app, &screen);
+        }
+        Ok(())
+    })
+}
+
+#[tauri::command]
+pub fn notebook_settings(state: State<'_, AppState>) -> CommandResult<NotebookSettings> {
+    state.with_notebook(|nb| {
+        let config = nb.config();
+        let rollover = config.rollover;
+        Ok(NotebookSettings {
+            daily_mode: Some(rollover.daily.mode.render().to_string()),
+            daily_at: Some(rollover.daily.at.render()),
+            weekly_mode: Some(rollover.weekly.mode.render().to_string()),
+            weekly_at: Some(rollover.weekly.at.render()),
+            week_starts_on: Some(rollover.weekly.starts_on.render().to_string()),
+            restore_last_screen: Some(config.restore_last_screen),
+            show_list_counts: Some(config.show_list_counts),
         })
     })
 }
@@ -140,15 +202,37 @@ pub fn notebook_settings(state: State<'_, AppState>) -> CommandResult<RolloverSe
 #[tauri::command]
 pub fn set_notebook_settings(
     state: State<'_, AppState>,
-    settings: RolloverSettings,
+    settings: NotebookSettings,
 ) -> CommandResult<()> {
     state.with_notebook_mut(|nb| {
         let mut config: Config = nb.config().clone();
-        config.rollover.daily.mode = RolloverMode::parse_or_default(&settings.daily_mode);
-        config.rollover.daily.at = TurnOffset::parse_or_default(&settings.daily_at);
-        config.rollover.weekly.mode = RolloverMode::parse_or_default(&settings.weekly_mode);
-        config.rollover.weekly.at = TurnOffset::parse_or_default(&settings.weekly_at);
-        config.rollover.weekly.starts_on = WeekStart::parse_or_default(&settings.week_starts_on);
+        let r = &mut config.rollover;
+
+        // A value that arrives unparseable falls back to the core's default,
+        // so the UI cannot write a broken config; a value that does not arrive
+        // at all is left exactly as it was.
+        if let Some(v) = &settings.daily_mode {
+            r.daily.mode = RolloverMode::parse_or_default(v);
+        }
+        if let Some(v) = &settings.daily_at {
+            r.daily.at = TurnOffset::parse_or_default(v);
+        }
+        if let Some(v) = &settings.weekly_mode {
+            r.weekly.mode = RolloverMode::parse_or_default(v);
+        }
+        if let Some(v) = &settings.weekly_at {
+            r.weekly.at = TurnOffset::parse_or_default(v);
+        }
+        if let Some(v) = &settings.week_starts_on {
+            r.weekly.starts_on = WeekStart::parse_or_default(v);
+        }
+        if let Some(v) = settings.restore_last_screen {
+            config.restore_last_screen = v;
+        }
+        if let Some(v) = settings.show_list_counts {
+            config.show_list_counts = v;
+        }
+
         nb.set_config(config)?;
         Ok(())
     })
@@ -159,6 +243,15 @@ pub fn set_notebook_settings(
 #[tauri::command]
 pub fn list_names(state: State<'_, AppState>) -> CommandResult<Vec<String>> {
     state.with_notebook(|nb| Ok(nb.list_names()?))
+}
+
+/// Conflicting copies a sync tool left in the notebook.
+///
+/// The app reports them; resolving is the user's call, since guessing which
+/// side to keep is how work gets lost.
+#[tauri::command]
+pub fn list_conflicts(state: State<'_, AppState>) -> CommandResult<Vec<Conflict>> {
+    state.with_notebook(|nb| Ok(nb.conflicts()?))
 }
 
 #[tauri::command]

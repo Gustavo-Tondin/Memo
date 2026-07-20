@@ -16,6 +16,31 @@
   let busy = $state(true);
   /// Bumped to tell the open screen to re-read from disk.
   let reloadKey = $state(0);
+  let counts = $state({});
+  let conflicts = $state([]);
+
+  /// A screen as a string, so the shell can store it without knowing what a
+  /// screen is. Same strings go back through `restoreView`.
+  function viewToId(v) {
+    if (v.kind === "period") return v.period;
+    if (v.kind === "list") return `list:${v.list}`;
+    return v.kind;
+  }
+
+  function restoreView(id) {
+    if (!id) return null;
+    if (id === "day" || id === "week") return { kind: "period", period: id };
+    if (id === "completed") return { kind: "completed" };
+    if (id.startsWith("list:")) return { kind: "list", list: id.slice(5) };
+    return null;
+  }
+
+  // Records where the user is. The shell ignores this when the notebook has
+  // the preference off, so no check is needed here.
+  $effect(() => {
+    const id = viewToId(view);
+    if (notebook) api.rememberScreen(id).catch(() => {});
+  });
 
   let userLists = $derived(
     (notebook?.lists ?? []).filter((name) => name !== COMPLETED),
@@ -30,7 +55,13 @@
 
   async function refreshNotebook() {
     notebook = await api.currentNotebook();
-    if (notebook) clock = await api.periodClock();
+    if (!notebook) return;
+    clock = await api.periodClock();
+    // Counts come back empty when the user turned them off.
+    [counts, conflicts] = await Promise.all([
+      api.listCounts(),
+      api.listConflicts(),
+    ]);
   }
 
   async function openAt(path) {
@@ -39,6 +70,13 @@
     try {
       notebook = await api.openNotebook(path);
       clock = await api.periodClock();
+      await refreshNotebook();
+
+      // Only after the notebook is open do we know whether it wants the last
+      // screen back.
+      const restored = restoreView(await api.screenToRestore());
+      if (restored) view = restored;
+
       scheduleTurn();
       reload();
     } catch (e) {
@@ -185,8 +223,11 @@
         {#each userLists as list}
           <button
             class:active={view.kind === "list" && view.list === list}
-            onclick={() => (view = { kind: "list", list })}>{list}</button
+            onclick={() => (view = { kind: "list", list })}
           >
+            {list}
+            {#if counts[list]}<span class="count">{counts[list]}</span>{/if}
+          </button>
         {/each}
 
         <hr />
@@ -204,6 +245,28 @@
       <section class="content">
         {#if error}
           <p class="error">{error} <button onclick={() => (error = null)}>ok</button></p>
+        {/if}
+
+        {#if conflicts.length > 0}
+          <!-- The one case where the user can silently lose work: two devices
+               edited the same list and the sync tool kept both. -->
+          <div class="conflict">
+            <strong
+              >{conflicts.length} conflito(s) de sincronização neste caderno</strong
+            >
+            <p>
+              Outro dispositivo editou os mesmos arquivos. O Memo não escolhe
+              por você — abra a pasta e decida qual versão fica.
+            </p>
+            <ul>
+              {#each conflicts as conflict}
+                <li>
+                  {#if conflict.list}<strong>{conflict.list}</strong>{/if}
+                  <code>{conflict.path}</code>
+                </li>
+              {/each}
+            </ul>
+          </div>
         {/if}
 
         {#if view.kind === "period"}
@@ -305,6 +368,28 @@
     border: 1px solid #f99;
     padding: 0.5rem;
     border-radius: 4px;
+  }
+  .conflict {
+    background: #fff8e1;
+    border: 1px solid #e6c34a;
+    padding: 0.5rem 0.75rem;
+    border-radius: 4px;
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+  }
+  .conflict ul {
+    margin: 0.5rem 0 0;
+    padding-left: 1.2rem;
+  }
+  .conflict code {
+    word-break: break-all;
+    font-size: 0.8rem;
+  }
+  .count {
+    float: right;
+    color: #666;
+    font-size: 0.85rem;
+    font-weight: normal;
   }
   .list-actions {
     margin-top: 2rem;

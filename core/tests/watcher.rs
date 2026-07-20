@@ -39,7 +39,7 @@ fn reports_a_list_edited_outside_the_app() {
     let watcher = notebook.watch().unwrap();
 
     std::fs::write(
-        dir.path().join("Tarefas/Inbox.md"),
+        dir.path().join("Tasks/Inbox.md"),
         "- [ ] escrita externa\n",
     )
     .unwrap();
@@ -57,7 +57,7 @@ fn reports_a_new_list_appearing() {
     let notebook = Notebook::init(dir.path()).unwrap();
     let watcher = notebook.watch().unwrap();
 
-    std::fs::write(dir.path().join("Tarefas/Compras.md"), "").unwrap();
+    std::fs::write(dir.path().join("Tasks/Compras.md"), "").unwrap();
 
     let change = wait_for(&watcher, |c| c.list_name().as_deref() == Some("Compras"));
     assert!(change.is_some(), "a new list should be reported");
@@ -94,7 +94,10 @@ fn the_apps_own_writes_do_not_surface_as_temporary_files() {
     // Drain whatever else the OS queued and check none of it is a temp file.
     for change in watcher.drain() {
         let path = match &change {
-            Change::List { path } | Change::State { path } | Change::Other { path } => path.clone(),
+            Change::List { path }
+            | Change::State { path }
+            | Change::Conflict { path }
+            | Change::Other { path } => path.clone(),
             Change::Config => continue,
         };
         assert!(
@@ -105,12 +108,34 @@ fn the_apps_own_writes_do_not_surface_as_temporary_files() {
 }
 
 #[test]
+fn a_conflict_appearing_is_reported_as_a_conflict() {
+    // Syncthing dropping a conflicting copy is the one file event the user
+    // must never miss — it is the only case where work can be lost silently.
+    let dir = tempfile::tempdir().unwrap();
+    let notebook = Notebook::init(dir.path()).unwrap();
+    let watcher = notebook.watch().unwrap();
+
+    std::fs::write(
+        dir.path()
+            .join("Tasks/Inbox.sync-conflict-20260720-143000-K3F7NLM.md"),
+        "- [ ] versão do celular\n",
+    )
+    .unwrap();
+
+    let change = wait_for(&watcher, |c| matches!(c, Change::Conflict { .. }));
+    assert!(
+        change.is_some(),
+        "a conflict copy must not be reported as a new list, got {change:?}"
+    );
+}
+
+#[test]
 fn drain_deduplicates_repeated_events_for_the_same_file() {
     let dir = tempfile::tempdir().unwrap();
     let notebook = Notebook::init(dir.path()).unwrap();
     let watcher = notebook.watch().unwrap();
 
-    let path = dir.path().join("Tarefas/Inbox.md");
+    let path = dir.path().join("Tasks/Inbox.md");
     for i in 0..5 {
         std::fs::write(&path, format!("- [ ] escrita {i}\n")).unwrap();
     }

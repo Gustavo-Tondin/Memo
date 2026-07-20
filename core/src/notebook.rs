@@ -14,11 +14,13 @@
 //! └── Notas/
 //! ```
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use chrono::NaiveDate;
 
 use crate::clock;
+use crate::conflict::Conflict;
 use crate::config::{Config, RolloverMode};
 use crate::error::{Error, IoContext, Result};
 use crate::list::TaskList;
@@ -79,9 +81,68 @@ impl Notebook {
         // A notebook written by a newer app is opened for reading only, so
         // nothing here may touch the disk.
         if !notebook.is_read_only() {
+            notebook.migrate_legacy_names()?;
             notebook.ensure_default_lists()?;
         }
         Ok(notebook)
+    }
+
+    /// Renames the Portuguese folders and list of older notebooks to the
+    /// English names the app settled on.
+    ///
+    /// Breaking a notebook that already exists is never an option: this same
+    /// rename will run on other people's notebooks when they update, so it
+    /// has to be boring and safe.
+    ///
+    /// Refuses to act whenever the destination already exists — two `Tasks/`
+    /// folders would be a worse problem than one `Tarefas/`.
+    fn migrate_legacy_names(&self) -> Result<()> {
+        let renamed_dirs = [
+            (crate::legacy::TASKS_DIR, TASKS_DIR),
+            (crate::legacy::NOTES_DIR, NOTES_DIR),
+        ];
+        for (from, to) in renamed_dirs {
+            let old = self.root.join(from);
+            let new = self.root.join(to);
+            if old.is_dir() && !new.exists() {
+                std::fs::rename(&old, &new).ctx(&new)?;
+            }
+        }
+
+        let old_completed = self.tasks_dir().join(format!("{}.md", crate::legacy::COMPLETED_LIST));
+        let new_completed = self.tasks_dir().join(format!("{COMPLETED_LIST}.md"));
+        if old_completed.is_file() && !new_completed.exists() {
+            std::fs::rename(&old_completed, &new_completed).ctx(&new_completed)?;
+        }
+
+        // Folder names never appear in `origin` or in the states — both store
+        // *list* names. Only the completed list was renamed, and it is a
+        // destination, not an origin, so this repoint matters just for a
+        // notebook someone edited by hand. Cheap enough to do anyway.
+        self.repoint_legacy_completed()
+    }
+
+    fn repoint_legacy_completed(&self) -> Result<()> {
+        let legacy = crate::legacy::COMPLETED_LIST;
+
+        for period in [Period::Day, Period::Week] {
+            let path = self.state_path(period);
+            if !path.exists() {
+                continue;
+            }
+            let mut file = StateFile::load(&path, self.current_period_date(period));
+            if file.state.rename_list(legacy, COMPLETED_LIST) {
+                file.save()?;
+            }
+        }
+
+        for name in self.list_names()? {
+            let mut list = self.open_list(&name)?;
+            if list.repoint_origin(legacy, COMPLETED_LIST) > 0 {
+                list.save()?;
+            }
+        }
+        Ok(())
     }
 
     /// Creates a notebook in an empty or existing folder.
@@ -192,6 +253,10 @@ impl Notebook {
         for entry in entries {
             let entry = entry.ctx(&dir)?;
             let path = entry.path();
+            // A copy left behind by a sync tool is not a list the user made.
+            if crate::conflict::is_conflict_file(&path) {
+                continue;
+            }
             if path.extension().is_some_and(|ext| ext == "md") {
                 if let Some(stem) = path.file_stem() {
                     names.push(stem.to_string_lossy().to_string());
@@ -200,6 +265,56 @@ impl Notebook {
         }
         names.sort();
         Ok(names)
+    }
+
+    /// How many open tasks each list has, for the navigation.
+    ///
+    /// One pass over the whole notebook instead of one read per list: the
+    /// sidebar shows every count at once, so asking list by list would re-read
+    /// the same folder N times on every render.
+    ///
+    /// Counts **open** tasks — a list of finished things reads as empty, which
+    /// is what "3 left to do" means to someone looking at a sidebar. The
+    /// completed list is skipped entirely, since everything in it is done.
+    pub fn open_task_counts(&self) -> Result<BTreeMap<String, usize>> {
+        let mut counts = BTreeMap::new();
+        for name in self.list_names()? {
+            if name == COMPLETED_LIST {
+                continue;
+            }
+            // Reading without adopting ids: counting is not a reason to write
+            // to every file in the notebook.
+            let open = self
+                .open_list(&name)?
+                .tasks()
+                .filter(|task| !task.done)
+                .count();
+            counts.insert(name, open);
+        }
+        Ok(counts)
+    }
+
+    /// Conflicting copies sitting in the notebook right now.
+    ///
+    /// Scans the tasks folder and the config folder, which is where sync tools
+    /// leave them. Reporting is all this does — the user decides what to keep.
+    pub fn conflicts(&self) -> Result<Vec<Conflict>> {
+        let mut found = Vec::new();
+        for dir in [self.tasks_dir(), self.config_dir()] {
+            let entries = match std::fs::read_dir(&dir) {
+                Ok(entries) => entries,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => return Err(Error::Io { path: dir, source: e }),
+            };
+            for entry in entries {
+                let path = entry.ctx(&dir)?.path();
+                if let Some(conflict) = crate::conflict::describe(&path) {
+                    found.push(conflict);
+                }
+            }
+        }
+        found.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(found)
     }
 
     pub fn open_list(&self, name: &str) -> Result<TaskList> {

@@ -16,9 +16,28 @@ const FILE_NAME: &str = "machine-prefs.json";
 #[serde(rename_all = "camelCase")]
 struct MachinePrefs {
     last_notebook: Option<PathBuf>,
+    /// The screen the user was on, as an opaque string the frontend owns
+    /// (`today`, `week`, `list:Compras`…).
+    ///
+    /// Deliberately opaque: the shell has no business knowing what a screen
+    /// is, and the frontend can add screens without touching Rust. Only used
+    /// when the notebook has `restoreLastScreen` on — the preference travels
+    /// with the notebook, the value stays on this machine.
+    last_screen: Option<String>,
 }
 
+/// Overrides where machine preferences are stored.
+///
+/// Lets someone keep the app's config somewhere else (a portable install, a
+/// different XDG layout), and lets the tests point each case at its own
+/// folder — these preferences are global to the machine, so tests running in
+/// parallel would otherwise fight over one file.
+const CONFIG_DIR_ENV: &str = "MEMO_CONFIG_DIR";
+
 fn path_of<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os(CONFIG_DIR_ENV) {
+        return Some(PathBuf::from(dir).join(FILE_NAME));
+    }
     app.path().app_config_dir().ok().map(|d| d.join(FILE_NAME))
 }
 
@@ -38,13 +57,32 @@ pub fn last_notebook<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
         .filter(|path| memo_core::Notebook::is_notebook(path))
 }
 
+/// The screen the app was on when it last closed.
+pub fn last_screen<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
+    load(app).last_screen
+}
+
 /// Remembers a notebook as the last one opened. Best effort: failing to
 /// write must never stop the notebook from opening.
 pub fn remember_notebook<R: Runtime>(app: &AppHandle<R>, notebook: &Path) {
+    update(app, |prefs| {
+        prefs.last_notebook = Some(notebook.to_path_buf());
+    });
+}
+
+/// Remembers the current screen, so the next launch can return to it.
+pub fn remember_screen<R: Runtime>(app: &AppHandle<R>, screen: &str) {
+    update(app, |prefs| prefs.last_screen = Some(screen.to_string()));
+}
+
+/// Reads, changes and writes the preferences. Every failure path is silent on
+/// purpose: losing these costs the user one click, and none of it is worth
+/// interrupting them over.
+fn update<R: Runtime>(app: &AppHandle<R>, change: impl FnOnce(&mut MachinePrefs)) {
     let Some(path) = path_of(app) else { return };
 
     let mut prefs = load(app);
-    prefs.last_notebook = Some(notebook.to_path_buf());
+    change(&mut prefs);
 
     let Ok(text) = serde_json::to_string_pretty(&prefs) else {
         return;
@@ -55,6 +93,6 @@ pub fn remember_notebook<R: Runtime>(app: &AppHandle<R>, notebook: &Path) {
         }
     }
     if let Err(e) = std::fs::write(&path, text) {
-        eprintln!("[memo] could not remember the last notebook: {e}");
+        eprintln!("[memo] could not save machine preferences: {e}");
     }
 }

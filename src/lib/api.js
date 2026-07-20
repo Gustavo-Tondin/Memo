@@ -11,9 +11,13 @@ export const api = {
   pickFolder: () => invoke("pick_notebook_folder"),
   openNotebook: (path) => invoke("open_notebook", { path }),
   currentNotebook: () => invoke("current_notebook"),
+  screenToRestore: () => invoke("screen_to_restore"),
+  rememberScreen: (screen) => invoke("remember_screen", { screen }),
 
   // lists
   listNames: () => invoke("list_names"),
+  listCounts: () => invoke("list_counts"),
+  listConflicts: () => invoke("list_conflicts"),
   listTasks: (list) => invoke("list_tasks", { list }),
   createList: (name) => invoke("create_list", { name }),
   renameList: (from, to) => invoke("rename_list", { from, to }),

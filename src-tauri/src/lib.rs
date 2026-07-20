@@ -30,8 +30,12 @@ pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
             commands::last_notebook,
             commands::notebook_settings,
             commands::set_notebook_settings,
+            commands::screen_to_restore,
+            commands::remember_screen,
+            commands::list_counts,
             // lists
             commands::list_names,
+            commands::list_conflicts,
             commands::list_tasks,
             commands::create_list,
             commands::rename_list,

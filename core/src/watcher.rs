@@ -26,12 +26,15 @@ use crate::{NOTEBOOK_CONFIG_DIR, TASKS_DIR};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum Change {
-    /// A task list under `Tarefas/`.
+    /// A task list under `Tasks/`.
     List { path: PathBuf },
     /// A day/week state file.
     State { path: PathBuf },
     /// `.memo/config.json`.
     Config,
+    /// A sync tool left a conflicting copy behind. Checked before the other
+    /// kinds: the app has to surface this, not treat it as a new list.
+    Conflict { path: PathBuf },
     /// Anything else inside the notebook (notes, unknown files).
     Other { path: PathBuf },
 }
@@ -42,6 +45,12 @@ impl Change {
         // those would wake the app up twice for every single save.
         if path.extension().is_some_and(|ext| ext == "tmp") {
             return None;
+        }
+
+        // Before anything else: a conflicting copy is never a list, a state or
+        // a config, even though its name looks like one of them.
+        if crate::conflict::is_conflict_file(&path) {
+            return Some(Self::Conflict { path });
         }
 
         if path.starts_with(config_dir) {

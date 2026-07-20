@@ -26,7 +26,7 @@ fn notebook_with_task(dir: &Path, text: &str) -> (Notebook, String) {
 // ------------------------------------------------------------- completing
 
 #[test]
-fn completing_moves_the_task_to_completas_with_its_origin() {
+fn completing_moves_the_task_to_completed_with_its_origin() {
     let dir = tempfile::tempdir().unwrap();
     let notebook = Notebook::init(dir.path()).unwrap();
     notebook.create_list("Compras").unwrap();
@@ -39,13 +39,13 @@ fn completing_moves_the_task_to_completas_with_its_origin() {
     assert!(task.done);
     assert_eq!(task.origin.as_deref(), Some("Compras"));
 
-    let completed = read(dir.path().join("Tarefas/Completas.md"));
+    let completed = read(dir.path().join("Tasks/Completed.md"));
     assert!(completed.contains("- [x] Comprar leite"));
     assert!(completed.contains(&format!("id:{id}")));
     assert!(completed.contains("origin:Compras"));
 
     // And it really left the source file.
-    assert!(!read(dir.path().join("Tarefas/Compras.md")).contains("Comprar leite"));
+    assert!(!read(dir.path().join("Tasks/Compras.md")).contains("Comprar leite"));
 }
 
 #[test]
@@ -79,9 +79,9 @@ fn undoing_sends_the_task_back_to_its_origin_list() {
     assert!(!task.done);
     assert_eq!(task.origin, None, "origin is consumed by the undo");
 
-    let compras = read(dir.path().join("Tarefas/Compras.md"));
+    let compras = read(dir.path().join("Tasks/Compras.md"));
     assert!(compras.contains("- [ ] Comprar leite"));
-    assert!(!read(dir.path().join("Tarefas/Completas.md")).contains("Comprar leite"));
+    assert!(!read(dir.path().join("Tasks/Completed.md")).contains("Comprar leite"));
 }
 
 #[test]
@@ -96,11 +96,11 @@ fn undoing_recreates_an_origin_list_that_was_deleted_outside_the_app() {
     notebook.complete_task("Compras", &id).unwrap();
 
     // The user deletes the list in the file manager while the task sits in
-    // Completas.
-    std::fs::remove_file(dir.path().join("Tarefas/Compras.md")).unwrap();
+    // Completed.
+    std::fs::remove_file(dir.path().join("Tasks/Compras.md")).unwrap();
 
     notebook.uncomplete_task(&id).unwrap();
-    assert!(read(dir.path().join("Tarefas/Compras.md")).contains("Comprar leite"));
+    assert!(read(dir.path().join("Tasks/Compras.md")).contains("Comprar leite"));
 }
 
 #[test]
@@ -110,13 +110,13 @@ fn undoing_a_task_without_a_usable_origin_falls_back_to_the_inbox() {
 
     // Written by hand in Obsidian: done, with an id, but no origin.
     std::fs::write(
-        dir.path().join("Tarefas/Completas.md"),
+        dir.path().join("Tasks/Completed.md"),
         "- [x] Pagar internet <!--id:abc123-->\n",
     )
     .unwrap();
 
     notebook.uncomplete_task("abc123").unwrap();
-    assert!(read(dir.path().join("Tarefas/Inbox.md")).contains("Pagar internet"));
+    assert!(read(dir.path().join("Tasks/Inbox.md")).contains("Pagar internet"));
 }
 
 #[test]
@@ -137,7 +137,7 @@ fn reading_a_list_adopts_checkboxes_written_by_hand() {
     let dir = tempfile::tempdir().unwrap();
     let notebook = Notebook::init(dir.path()).unwrap();
     std::fs::write(
-        dir.path().join("Tarefas/Inbox.md"),
+        dir.path().join("Tasks/Inbox.md"),
         "# Minha lista\n\n- [ ] escrita no Obsidian\n",
     )
     .unwrap();
@@ -147,7 +147,7 @@ fn reading_a_list_adopts_checkboxes_written_by_hand() {
     let id = tasks[0].id.clone().expect("id assigned on read");
 
     // Persisted, and the heading the user wrote is still there.
-    let on_disk = read(dir.path().join("Tarefas/Inbox.md"));
+    let on_disk = read(dir.path().join("Tasks/Inbox.md"));
     assert!(on_disk.contains(&format!("id:{id}")));
     assert!(on_disk.contains("# Minha lista"));
 
@@ -162,7 +162,7 @@ fn a_line_copy_pasted_with_its_id_gets_a_fresh_one() {
     let dir = tempfile::tempdir().unwrap();
     let notebook = Notebook::init(dir.path()).unwrap();
     std::fs::write(
-        dir.path().join("Tarefas/Inbox.md"),
+        dir.path().join("Tasks/Inbox.md"),
         "- [ ] Comprar leite <!--id:abc123-->\n- [ ] Comprar leite <!--id:abc123-->\n",
     )
     .unwrap();
@@ -192,7 +192,7 @@ fn a_reference_keeps_pointing_at_the_task_it_was_created_for() {
 
     let line = format!("- [ ] Comprar leite <!--id:{id}-->");
     std::fs::write(
-        dir.path().join("Tarefas/Inbox.md"),
+        dir.path().join("Tasks/Inbox.md"),
         format!("{line}\n{line}\n"),
     )
     .unwrap();
@@ -219,12 +219,12 @@ fn moving_a_task_into_a_list_that_already_uses_its_id() {
     notebook.create_list("Compras").unwrap();
 
     std::fs::write(
-        dir.path().join("Tarefas/Inbox.md"),
+        dir.path().join("Tasks/Inbox.md"),
         "- [ ] Da Inbox <!--id:mesmo1-->\n",
     )
     .unwrap();
     std::fs::write(
-        dir.path().join("Tarefas/Compras.md"),
+        dir.path().join("Tasks/Compras.md"),
         "- [ ] De Compras <!--id:mesmo1-->\n",
     )
     .unwrap();
@@ -232,7 +232,7 @@ fn moving_a_task_into_a_list_that_already_uses_its_id() {
     notebook.complete_task("Inbox", "mesmo1").unwrap();
     notebook.complete_task("Compras", "mesmo1").unwrap();
 
-    let completed = notebook.tasks_in("Completas").unwrap();
+    let completed = notebook.tasks_in("Completed").unwrap();
     assert_eq!(completed.len(), 2, "neither task may be swallowed");
 
     let ids: std::collections::HashSet<_> =
@@ -253,7 +253,7 @@ fn reading_a_read_only_notebook_does_not_adopt_ids() {
     let dir = tempfile::tempdir().unwrap();
     Notebook::init(dir.path()).unwrap();
     std::fs::write(
-        dir.path().join("Tarefas/Inbox.md"),
+        dir.path().join("Tasks/Inbox.md"),
         "- [ ] sem id\n",
     )
     .unwrap();
@@ -268,7 +268,7 @@ fn reading_a_read_only_notebook_does_not_adopt_ids() {
 
     assert_eq!(tasks.len(), 1);
     assert!(tasks[0].id.is_none(), "read-only must not write ids");
-    assert_eq!(read(dir.path().join("Tarefas/Inbox.md")), "- [ ] sem id\n");
+    assert_eq!(read(dir.path().join("Tasks/Inbox.md")), "- [ ] sem id\n");
 }
 
 // ------------------------------------------------------------------ lists
@@ -289,16 +289,16 @@ fn renaming_a_list_repoints_completed_origins_and_states() {
 
     notebook.rename_list("Compras", "Mercado").unwrap();
 
-    assert!(dir.path().join("Tarefas/Mercado.md").is_file());
-    assert!(!dir.path().join("Tarefas/Compras.md").exists());
-    assert!(read(dir.path().join("Tarefas/Completas.md")).contains("origin:Mercado"));
+    assert!(dir.path().join("Tasks/Mercado.md").is_file());
+    assert!(!dir.path().join("Tasks/Compras.md").exists());
+    assert!(read(dir.path().join("Tasks/Completed.md")).contains("origin:Mercado"));
 
     let state = notebook.open_state(Period::Day).unwrap();
     assert!(state.state.contains("Mercado", &pulled_id));
 
     // The undo still works, which is the whole point of repointing origins.
     notebook.uncomplete_task(&done_id).unwrap();
-    assert!(read(dir.path().join("Tarefas/Mercado.md")).contains("Comprar leite"));
+    assert!(read(dir.path().join("Tasks/Mercado.md")).contains("Comprar leite"));
 }
 
 #[test]
@@ -306,7 +306,7 @@ fn default_lists_cannot_be_renamed_or_deleted() {
     let dir = tempfile::tempdir().unwrap();
     let notebook = Notebook::init(dir.path()).unwrap();
 
-    for name in ["Inbox", "Completas"] {
+    for name in ["Inbox", "Completed"] {
         assert!(matches!(
             notebook.rename_list(name, "Outra").unwrap_err(),
             Error::ProtectedList(_)
@@ -327,8 +327,8 @@ fn renaming_onto_an_existing_list_is_refused() {
 
     assert!(notebook.rename_list("Compras", "Mercado").is_err());
     // Neither file was harmed.
-    assert!(dir.path().join("Tarefas/Compras.md").is_file());
-    assert!(dir.path().join("Tarefas/Mercado.md").is_file());
+    assert!(dir.path().join("Tasks/Compras.md").is_file());
+    assert!(dir.path().join("Tasks/Mercado.md").is_file());
 }
 
 #[test]
@@ -346,9 +346,9 @@ fn deleting_a_list_rescues_its_tasks_into_the_inbox() {
     let rescued = notebook.delete_list("Compras").unwrap();
 
     assert_eq!(rescued, 2);
-    assert!(!dir.path().join("Tarefas/Compras.md").exists());
+    assert!(!dir.path().join("Tasks/Compras.md").exists());
 
-    let inbox = read(dir.path().join("Tarefas/Inbox.md"));
+    let inbox = read(dir.path().join("Tasks/Inbox.md"));
     assert!(inbox.contains("Comprar leite"));
     assert!(inbox.contains("Comprar pão"));
 
@@ -412,7 +412,7 @@ fn removing_from_a_period_leaves_the_task_alone() {
     assert!(notebook.remove_from(Period::Day, "Inbox", &id).unwrap());
 
     assert!(notebook.open_state(Period::Day).unwrap().state.is_empty());
-    assert!(read(dir.path().join("Tarefas/Inbox.md")).contains("Comprar leite"));
+    assert!(read(dir.path().join("Tasks/Inbox.md")).contains("Comprar leite"));
 }
 
 #[test]
@@ -425,7 +425,7 @@ fn a_task_created_in_today_is_physically_written_to_the_inbox() {
         .add_task_in_period(Period::Day, "Responder e-mail")
         .unwrap();
 
-    let inbox = read(dir.path().join("Tarefas/Inbox.md"));
+    let inbox = read(dir.path().join("Tasks/Inbox.md"));
     assert!(inbox.contains("- [ ] Responder e-mail"));
     assert!(inbox.contains(&format!("id:{id}")));
 
@@ -454,7 +454,7 @@ fn the_state_rolls_over_when_the_notebook_is_reopened_later() {
     assert!(rolled.state.is_empty());
     assert_eq!(rolled.state.date, reopened.today());
     // ...and the task itself is untouched, back to being a suggestion.
-    assert!(read(dir.path().join("Tarefas/Inbox.md")).contains("Comprar leite"));
+    assert!(read(dir.path().join("Tasks/Inbox.md")).contains("Comprar leite"));
 }
 
 #[test]
@@ -571,9 +571,141 @@ fn a_reference_to_a_task_deleted_elsewhere_is_skipped() {
     notebook.pull_into(Period::Day, "Inbox", &id).unwrap();
 
     // Someone deletes the line in Obsidian.
-    std::fs::write(dir.path().join("Tarefas/Inbox.md"), "").unwrap();
+    std::fs::write(dir.path().join("Tasks/Inbox.md"), "").unwrap();
 
     assert!(notebook.period_tasks(Period::Day).unwrap().is_empty());
+}
+
+// ------------------------------------------------------------- contagem
+
+#[test]
+fn counts_only_the_open_tasks_of_each_list() {
+    let dir = tempfile::tempdir().unwrap();
+    let notebook = Notebook::init(dir.path()).unwrap();
+    notebook.create_list("Compras").unwrap();
+
+    let mut compras = notebook.open_list("Compras").unwrap();
+    compras.add_text("Comprar leite");
+    let done = compras.add_text("Comprar pão");
+    compras.save().unwrap();
+    notebook.complete_task("Compras", &done).unwrap();
+
+    let counts = notebook.open_task_counts().unwrap();
+
+    assert_eq!(counts.get("Compras"), Some(&1), "só a tarefa em aberto");
+    assert_eq!(counts.get("Inbox"), Some(&0));
+    assert_eq!(
+        counts.get("Completed"),
+        None,
+        "a lista de concluídas não tem contagem — tudo nela está feito"
+    );
+}
+
+#[test]
+fn counting_does_not_write_to_the_notebook() {
+    // Counting is a read. Adopting ids here would rewrite every file in the
+    // notebook just because the sidebar rendered.
+    let dir = tempfile::tempdir().unwrap();
+    let notebook = Notebook::init(dir.path()).unwrap();
+    let original = "- [ ] escrita à mão, sem id\n";
+    std::fs::write(dir.path().join("Tasks/Inbox.md"), original).unwrap();
+
+    assert_eq!(notebook.open_task_counts().unwrap().get("Inbox"), Some(&1));
+    assert_eq!(read(dir.path().join("Tasks/Inbox.md")), original);
+}
+
+#[test]
+fn a_conflict_copy_is_not_counted_as_a_list() {
+    let dir = tempfile::tempdir().unwrap();
+    let notebook = Notebook::init(dir.path()).unwrap();
+    std::fs::write(
+        dir.path()
+            .join("Tasks/Inbox.sync-conflict-20260720-143000-K3F7NLM.md"),
+        "- [ ] versão do celular\n",
+    )
+    .unwrap();
+
+    let counts = notebook.open_task_counts().unwrap();
+    assert_eq!(counts.len(), 1, "só a Inbox de verdade: {counts:?}");
+}
+
+// ---------------------------------------------------- conflitos de sync
+
+/// The file Syncthing leaves behind when two devices edited the same list.
+fn write_conflict(dir: &Path, list: &str, contents: &str) -> std::path::PathBuf {
+    let path = dir
+        .join("Tasks")
+        .join(format!("{list}.sync-conflict-20260720-143000-K3F7NLM.md"));
+    std::fs::write(&path, contents).unwrap();
+    path
+}
+
+#[test]
+fn a_conflict_copy_is_not_shown_as_a_list() {
+    // The bug this prevents: the leftover file used to appear in the sidebar
+    // as a list called "Inbox.sync-conflict-20260720-143000-K3F7NLM".
+    let dir = tempfile::tempdir().unwrap();
+    let notebook = Notebook::init(dir.path()).unwrap();
+    write_conflict(dir.path(), "Inbox", "- [ ] versão do celular\n");
+
+    assert_eq!(notebook.list_names().unwrap(), vec!["Completed", "Inbox"]);
+}
+
+#[test]
+fn conflicts_are_reported_with_the_list_they_belong_to() {
+    let dir = tempfile::tempdir().unwrap();
+    let notebook = Notebook::init(dir.path()).unwrap();
+    let path = write_conflict(dir.path(), "Inbox", "- [ ] versão do celular\n");
+
+    let conflicts = notebook.conflicts().unwrap();
+
+    assert_eq!(conflicts.len(), 1);
+    assert_eq!(conflicts[0].path, path);
+    assert_eq!(conflicts[0].list.as_deref(), Some("Inbox"));
+    assert_eq!(
+        conflicts[0].original,
+        Some(dir.path().join("Tasks/Inbox.md")),
+        "the user needs to know which file it conflicts with"
+    );
+}
+
+#[test]
+fn a_notebook_without_conflicts_reports_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let notebook = Notebook::init(dir.path()).unwrap();
+    notebook.create_list("Compras").unwrap();
+
+    assert!(notebook.conflicts().unwrap().is_empty());
+}
+
+#[test]
+fn a_conflict_on_a_state_file_is_reported_too() {
+    // Two devices planning the same day is exactly when this happens.
+    let dir = tempfile::tempdir().unwrap();
+    let notebook = Notebook::init(dir.path()).unwrap();
+    std::fs::write(
+        dir.path()
+            .join(".memo/daily-state.sync-conflict-20260720-143000-K3F7NLM.json"),
+        "{}",
+    )
+    .unwrap();
+
+    let conflicts = notebook.conflicts().unwrap();
+    assert_eq!(conflicts.len(), 1);
+    assert_eq!(conflicts[0].list, None, "a state file is not a list");
+}
+
+#[test]
+fn the_conflicting_copy_is_left_untouched() {
+    // Detect and report — never resolve. Deleting the wrong side loses work.
+    let dir = tempfile::tempdir().unwrap();
+    let notebook = Notebook::init(dir.path()).unwrap();
+    let path = write_conflict(dir.path(), "Inbox", "- [ ] versão do celular\n");
+
+    notebook.conflicts().unwrap();
+    notebook.tasks_in("Inbox").unwrap();
+
+    assert_eq!(read(&path), "- [ ] versão do celular\n");
 }
 
 // -------------------------------------------------------------- read-only
@@ -637,15 +769,15 @@ fn the_whole_phase_two_scenario_end_to_end() {
 
     notebook.complete_task("Compras", &id).unwrap();
 
-    assert!(read(dir.path().join("Tarefas/Completas.md")).contains("- [x] Comprar leite"));
+    assert!(read(dir.path().join("Tasks/Completed.md")).contains("- [x] Comprar leite"));
     assert!(notebook.open_state(Period::Day).unwrap().state.is_empty());
     assert!(notebook.open_state(Period::Week).unwrap().state.is_empty());
 
     notebook.uncomplete_task(&id).unwrap();
 
-    let compras = TaskList::load(dir.path().join("Tarefas/Compras.md")).unwrap();
+    let compras = TaskList::load(dir.path().join("Tasks/Compras.md")).unwrap();
     let task = compras.find(&id).unwrap();
     assert_eq!(task.text, "Comprar leite");
     assert!(!task.done);
-    assert!(read(dir.path().join("Tarefas/Completas.md")).trim().is_empty());
+    assert!(read(dir.path().join("Tasks/Completed.md")).trim().is_empty());
 }

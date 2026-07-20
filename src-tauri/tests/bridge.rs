@@ -48,7 +48,8 @@ fn invoke(app: &MockApp, cmd: &str, args: Value) -> Result<Value, Value> {
 }
 
 /// An app with a webview and a freshly created notebook, ready to drive.
-fn app_with_notebook() -> (MockApp, tempfile::TempDir) {
+fn app_with_notebook() -> (std::sync::MutexGuard<'static, ()>, MockApp, tempfile::TempDir) {
+    let lock = exclusive();
     let app = app();
     WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()
@@ -57,15 +58,40 @@ fn app_with_notebook() -> (MockApp, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     invoke(&app, "open_notebook", json!({ "path": dir.path() }))
         .expect("open_notebook should succeed");
-    (app, dir)
+    (lock, app, dir)
 }
 
 fn ok(app: &MockApp, cmd: &str, args: Value) -> Value {
     invoke(app, cmd, args).unwrap_or_else(|e| panic!("{cmd} failed: {e}"))
 }
 
+/// Serializes the whole suite and gives it a clean preferences file.
+///
+/// Machine preferences are one file per machine, and **every** test that opens
+/// a notebook writes to it. Isolating only the tests that assert on it is not
+/// enough: the other ones still race against those. Since the suite runs in
+/// milliseconds, running it one test at a time is the cheap, honest fix.
+///
+/// The guard must be held for the whole test — bind it, do not discard it.
+#[must_use]
+fn exclusive() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+
+    // A poisoned lock only means an earlier test panicked; the isolation still
+    // works, so recover instead of failing every test after the first failure.
+    let guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+    let dir = DIR.get_or_init(|| tempfile::tempdir().unwrap());
+    std::env::set_var("MEMO_CONFIG_DIR", dir.path());
+    let _ = std::fs::remove_file(dir.path().join("machine-prefs.json"));
+
+    guard
+}
+
 #[test]
 fn core_version_answers_over_the_bridge() {
+    let _lock = exclusive();
     let app = app();
     WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()
@@ -77,6 +103,7 @@ fn core_version_answers_over_the_bridge() {
 
 #[test]
 fn commands_fail_cleanly_before_a_notebook_is_open() {
+    let _lock = exclusive();
     // The UI can call something before onboarding finishes; that must be a
     // typed error, not a panic that takes the window down.
     let app = app();
@@ -92,13 +119,13 @@ fn commands_fail_cleanly_before_a_notebook_is_open() {
 
 #[test]
 fn opening_a_notebook_reports_it_and_creates_the_layout() {
-    let (app, dir) = app_with_notebook();
+    let (_lock, app, dir) = app_with_notebook();
 
     let info = ok(&app, "current_notebook", json!({}));
     assert_eq!(info["readOnly"], json!(false));
     assert_eq!(
         info["lists"],
-        json!(["Completas", "Inbox"]),
+        json!(["Completed", "Inbox"]),
         "default lists should exist and be sorted"
     );
     assert!(dir.path().join(".memo/config.json").is_file());
@@ -107,7 +134,7 @@ fn opening_a_notebook_reports_it_and_creates_the_layout() {
 
 #[test]
 fn the_full_task_lifecycle_over_the_bridge() {
-    let (app, dir) = app_with_notebook();
+    let (_lock, app, dir) = app_with_notebook();
 
     ok(&app, "create_list", json!({ "name": "Compras" }));
     let id = ok(
@@ -149,7 +176,7 @@ fn the_full_task_lifecycle_over_the_bridge() {
     let state = ok(&app, "period_state", json!({ "period": "day" }));
     assert_eq!(state["items"], json!([]));
 
-    let completed = std::fs::read_to_string(dir.path().join("Tarefas/Completas.md")).unwrap();
+    let completed = std::fs::read_to_string(dir.path().join("Tasks/Completed.md")).unwrap();
     assert!(completed.contains("- [x] Comprar leite integral"));
     assert!(completed.contains("origin:Compras"));
 
@@ -160,7 +187,7 @@ fn the_full_task_lifecycle_over_the_bridge() {
 
 #[test]
 fn creating_a_task_from_today_writes_it_to_the_inbox() {
-    let (app, dir) = app_with_notebook();
+    let (_lock, app, dir) = app_with_notebook();
 
     let id = ok(
         &app,
@@ -169,7 +196,7 @@ fn creating_a_task_from_today_writes_it_to_the_inbox() {
     );
     let id = id.as_str().unwrap();
 
-    let inbox = std::fs::read_to_string(dir.path().join("Tarefas/Inbox.md")).unwrap();
+    let inbox = std::fs::read_to_string(dir.path().join("Tasks/Inbox.md")).unwrap();
     assert!(inbox.contains("Responder e-mail"));
 
     let state = ok(&app, "period_state", json!({ "period": "day" }));
@@ -188,7 +215,7 @@ fn creating_a_task_from_today_writes_it_to_the_inbox() {
 
 #[test]
 fn list_management_over_the_bridge() {
-    let (app, dir) = app_with_notebook();
+    let (_lock, app, dir) = app_with_notebook();
 
     ok(&app, "create_list", json!({ "name": "Compras" }));
     ok(
@@ -202,19 +229,19 @@ fn list_management_over_the_bridge() {
         "rename_list",
         json!({ "from": "Compras", "to": "Mercado" }),
     );
-    assert!(dir.path().join("Tarefas/Mercado.md").is_file());
+    assert!(dir.path().join("Tasks/Mercado.md").is_file());
 
     // Deleting rescues the task into the Inbox rather than dropping it.
     let rescued = ok(&app, "delete_list", json!({ "name": "Mercado" }));
     assert_eq!(rescued, json!(1));
-    assert!(std::fs::read_to_string(dir.path().join("Tarefas/Inbox.md"))
+    assert!(std::fs::read_to_string(dir.path().join("Tasks/Inbox.md"))
         .unwrap()
         .contains("Comprar leite"));
 }
 
 #[test]
 fn errors_arrive_typed_so_the_ui_can_branch_on_them() {
-    let (app, _dir) = app_with_notebook();
+    let (_lock, app, _dir) = app_with_notebook();
 
     let err = invoke(
         &app,
@@ -234,7 +261,7 @@ fn errors_arrive_typed_so_the_ui_can_branch_on_them() {
 
 #[test]
 fn settings_round_trip_through_the_bridge() {
-    let (app, dir) = app_with_notebook();
+    let (_lock, app, dir) = app_with_notebook();
 
     let defaults = ok(&app, "notebook_settings", json!({}));
     assert_eq!(defaults["dailyMode"], "reset");
@@ -268,7 +295,7 @@ fn settings_round_trip_through_the_bridge() {
 
 #[test]
 fn nonsense_settings_are_normalized_instead_of_corrupting_the_config() {
-    let (app, _dir) = app_with_notebook();
+    let (_lock, app, _dir) = app_with_notebook();
 
     ok(
         &app,
@@ -292,7 +319,7 @@ fn nonsense_settings_are_normalized_instead_of_corrupting_the_config() {
 
 #[test]
 fn the_clock_command_reports_the_logical_periods() {
-    let (app, _dir) = app_with_notebook();
+    let (_lock, app, _dir) = app_with_notebook();
 
     let clock = ok(&app, "period_clock", json!({}));
     let today = clock["today"].as_str().unwrap();
@@ -306,7 +333,7 @@ fn the_clock_command_reports_the_logical_periods() {
 
 #[test]
 fn refresh_periods_returns_both_states() {
-    let (app, _dir) = app_with_notebook();
+    let (_lock, app, _dir) = app_with_notebook();
 
     let states = ok(&app, "refresh_periods", json!({}));
     assert_eq!(states.as_array().unwrap().len(), 2);
@@ -353,7 +380,7 @@ fn dialog_helpers_are_never_called_from_a_blocking_command() {
 
 #[test]
 fn the_day_offers_the_week_first_then_the_rest() {
-    let (app, _dir) = app_with_notebook();
+    let (_lock, app, _dir) = app_with_notebook();
     ok(&app, "create_list", json!({ "name": "Compras" }));
 
     let solta = ok(
@@ -391,8 +418,98 @@ fn the_day_offers_the_week_first_then_the_rest() {
 }
 
 #[test]
+fn sync_conflicts_reach_the_frontend() {
+    let (_lock, app, dir) = app_with_notebook();
+    ok(&app, "create_list", json!({ "name": "Compras" }));
+
+    assert_eq!(ok(&app, "list_conflicts", json!({})), json!([]));
+
+    std::fs::write(
+        dir.path()
+            .join("Tasks/Compras.sync-conflict-20260720-143000-K3F7NLM.md"),
+        "- [ ] versão do celular\n",
+    )
+    .unwrap();
+
+    let conflicts = ok(&app, "list_conflicts", json!({}));
+    assert_eq!(conflicts.as_array().unwrap().len(), 1);
+    assert_eq!(conflicts[0]["list"], "Compras");
+    assert!(conflicts[0]["original"].as_str().unwrap().ends_with("Compras.md"));
+
+    // And it must not have become a list in the sidebar.
+    assert_eq!(ok(&app, "list_names", json!({})), json!(["Completed", "Compras", "Inbox"]));
+}
+
+#[test]
+fn a_partial_settings_payload_keeps_what_it_did_not_mention() {
+    // An older frontend, or a screen that only edits one thing, must not wipe
+    // the preferences it does not know about.
+    let (_lock, app, _dir) = app_with_notebook();
+
+    ok(
+        &app,
+        "set_notebook_settings",
+        json!({ "settings": { "dailyMode": "carry", "showListCounts": false } }),
+    );
+    ok(
+        &app,
+        "set_notebook_settings",
+        json!({ "settings": { "weeklyAt": "02:00" } }),
+    );
+
+    let saved = ok(&app, "notebook_settings", json!({}));
+    assert_eq!(saved["weeklyAt"], "02:00", "the field that was sent");
+    assert_eq!(saved["dailyMode"], "carry", "survived the second call");
+    assert_eq!(saved["showListCounts"], json!(false), "survived too");
+}
+
+#[test]
+fn list_counts_follow_the_setting() {
+    let (_lock, app, _dir) = app_with_notebook();
+    ok(&app, "create_list", json!({ "name": "Compras" }));
+    ok(
+        &app,
+        "create_task",
+        json!({ "list": "Compras", "text": "Comprar leite" }),
+    );
+
+    let counts = ok(&app, "list_counts", json!({}));
+    assert_eq!(counts["Compras"], json!(1));
+    assert_eq!(counts["Inbox"], json!(0));
+
+    // Turned off, the command answers empty — the frontend does not need to
+    // know the rule, it just renders what it gets.
+    let mut settings = ok(&app, "notebook_settings", json!({}));
+    settings["showListCounts"] = json!(false);
+    ok(&app, "set_notebook_settings", json!({ "settings": settings }));
+
+    assert_eq!(ok(&app, "list_counts", json!({})), json!({}));
+}
+
+#[test]
+fn the_last_screen_is_only_restored_when_the_user_asked_for_it() {
+    let (_lock, app, _dir) = app_with_notebook();
+
+    // Off by default: nothing is stored and nothing is restored.
+    ok(&app, "remember_screen", json!({ "screen": "list:Compras" }));
+    assert_eq!(ok(&app, "screen_to_restore", json!({})), Value::Null);
+
+    let mut settings = ok(&app, "notebook_settings", json!({}));
+    assert_eq!(settings["restoreLastScreen"], json!(false));
+    settings["restoreLastScreen"] = json!(true);
+    ok(&app, "set_notebook_settings", json!({ "settings": settings }));
+
+    // Still null: turning the preference on must not resurrect a screen the
+    // app was never allowed to record.
+    assert_eq!(ok(&app, "screen_to_restore", json!({})), Value::Null);
+
+    ok(&app, "remember_screen", json!({ "screen": "week" }));
+    assert_eq!(ok(&app, "screen_to_restore", json!({})), json!("week"));
+}
+
+#[test]
 fn the_last_notebook_is_remembered_across_launches() {
-    let (app, dir) = app_with_notebook();
+    let (_lock, app, dir) = app_with_notebook();
 
     let remembered = ok(&app, "last_notebook", json!({}));
     assert_eq!(remembered, json!(dir.path()));
@@ -404,7 +521,7 @@ fn external_changes_reach_the_frontend_as_events() {
     // to hear about it without polling.
     use tauri::Listener;
 
-    let (app, dir) = app_with_notebook();
+    let (_lock, app, dir) = app_with_notebook();
     let (tx, rx) = std::sync::mpsc::channel();
 
     app.listen_any("notebook://changed", move |event| {
@@ -412,7 +529,7 @@ fn external_changes_reach_the_frontend_as_events() {
     });
 
     std::fs::write(
-        dir.path().join("Tarefas/Inbox.md"),
+        dir.path().join("Tasks/Inbox.md"),
         "- [ ] escrita por outro app\n",
     )
     .unwrap();
@@ -428,7 +545,7 @@ fn external_changes_reach_the_frontend_as_events() {
 
 #[test]
 fn opening_a_second_notebook_switches_the_open_one() {
-    let (app, first) = app_with_notebook();
+    let (_lock, app, first) = app_with_notebook();
     ok(&app, "create_list", json!({ "name": "SoNoPrimeiro" }));
 
     let second = tempfile::tempdir().unwrap();
@@ -436,8 +553,8 @@ fn opening_a_second_notebook_switches_the_open_one() {
 
     let info = ok(&app, "current_notebook", json!({}));
     assert_eq!(info["path"], json!(second.path()));
-    assert_eq!(info["lists"], json!(["Completas", "Inbox"]));
+    assert_eq!(info["lists"], json!(["Completed", "Inbox"]));
 
     // The first notebook is untouched on disk, just no longer open.
-    assert!(first.path().join("Tarefas/SoNoPrimeiro.md").is_file());
+    assert!(first.path().join("Tasks/SoNoPrimeiro.md").is_file());
 }

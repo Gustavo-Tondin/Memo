@@ -75,6 +75,16 @@ pub struct Rollover {
 pub struct Config {
     schema_version: u64,
     pub rollover: Rollover,
+    /// Reopen on the screen the user left, instead of always landing on Today.
+    ///
+    /// Off by default: landing somewhere temporally relevant is the more
+    /// predictable behaviour, and this is the kind of thing people want only
+    /// once they have a habit. The *preference* lives here so it applies on
+    /// every machine; the screen it points at is machine-specific and lives in
+    /// the OS config folder.
+    pub restore_last_screen: bool,
+    /// Show how many open tasks each list has, in the navigation.
+    pub show_list_counts: bool,
     /// The document exactly as it was read, so keys this build does not know
     /// about are written back instead of being silently dropped. This is what
     /// protects a notebook opened by two different app versions.
@@ -86,6 +96,8 @@ impl Default for Config {
         Self {
             schema_version: SUPPORTED_SCHEMA_VERSION,
             rollover: Rollover::default(),
+            restore_last_screen: false,
+            show_list_counts: true,
             raw: Map::new(),
         }
     }
@@ -131,9 +143,16 @@ impl Config {
             .map(parse_rollover)
             .unwrap_or_default();
 
+        let defaults = Self::default();
         Self {
             schema_version,
             rollover,
+            restore_last_screen: read_bool(
+                &raw,
+                "restoreLastScreen",
+                defaults.restore_last_screen,
+            ),
+            show_list_counts: read_bool(&raw, "showListCounts", defaults.show_list_counts),
             raw,
         }
     }
@@ -150,6 +169,14 @@ impl Config {
                     Value::from(self.schema_version),
                 ),
                 ("rollover".to_string(), render_rollover(&self.rollover)),
+                (
+                    "restoreLastScreen".to_string(),
+                    Value::from(self.restore_last_screen),
+                ),
+                (
+                    "showListCounts".to_string(),
+                    Value::from(self.show_list_counts),
+                ),
             ])),
         );
 
@@ -191,6 +218,12 @@ fn parse_rollover(block: &Map<String, Value>) -> Rollover {
                 .unwrap_or_default(),
         },
     }
+}
+
+/// Reads a boolean, falling back to the default when absent or the wrong type.
+/// A malformed preference never blocks the notebook from opening (spec 3.4).
+fn read_bool(raw: &Map<String, Value>, key: &str, default: bool) -> bool {
+    raw.get(key).and_then(Value::as_bool).unwrap_or(default)
 }
 
 fn read_mode(block: Option<&Map<String, Value>>) -> RolloverMode {
@@ -276,9 +309,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_new_toggles_round_trip_and_tolerate_garbage() {
+        let mut config = Config::default();
+        assert!(!config.restore_last_screen, "off by default");
+        assert!(config.show_list_counts, "on by default");
+
+        config.restore_last_screen = true;
+        config.show_list_counts = false;
+        let reparsed = Config::parse(&config.render());
+        assert!(reparsed.restore_last_screen);
+        assert!(!reparsed.show_list_counts);
+
+        // Wrong type falls back to the default instead of failing to open.
+        let broken = Config::parse(
+            r#"{ "schemaVersion": 1, "restoreLastScreen": "yes", "showListCounts": 3 }"#,
+        );
+        assert!(!broken.restore_last_screen);
+        assert!(broken.show_list_counts);
+    }
+
+    #[test]
     fn defaults_match_the_spec() {
         let config = Config::default();
         assert_eq!(config.schema_version(), 1);
+        assert!(!config.restore_last_screen);
+        assert!(config.show_list_counts);
         assert_eq!(config.rollover.daily.mode, RolloverMode::Reset);
         assert_eq!(config.rollover.daily.at, TurnOffset::MIDNIGHT);
         assert_eq!(config.rollover.weekly.mode, RolloverMode::Reset);

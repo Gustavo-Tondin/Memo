@@ -25,10 +25,10 @@ fn init_creates_the_documented_layout() {
     let notebook = Notebook::init(dir.path()).unwrap();
 
     assert!(dir.path().join(".memo").is_dir());
-    assert!(dir.path().join("Tarefas").is_dir());
-    assert!(dir.path().join("Notas").is_dir());
-    assert!(dir.path().join("Tarefas/Inbox.md").is_file());
-    assert!(dir.path().join("Tarefas/Completas.md").is_file());
+    assert!(dir.path().join("Tasks").is_dir());
+    assert!(dir.path().join("Notes").is_dir());
+    assert!(dir.path().join("Tasks/Inbox.md").is_file());
+    assert!(dir.path().join("Tasks/Completed.md").is_file());
     assert!(Notebook::is_notebook(notebook.root()));
 }
 
@@ -54,13 +54,13 @@ fn open_recreates_default_lists_deleted_from_outside() {
     let dir = tempfile::tempdir().unwrap();
     Notebook::init(dir.path()).unwrap();
 
-    std::fs::remove_file(dir.path().join("Tarefas/Inbox.md")).unwrap();
-    std::fs::remove_file(dir.path().join("Tarefas/Completas.md")).unwrap();
+    std::fs::remove_file(dir.path().join("Tasks/Inbox.md")).unwrap();
+    std::fs::remove_file(dir.path().join("Tasks/Completed.md")).unwrap();
 
     Notebook::open(dir.path()).unwrap();
 
-    assert!(dir.path().join("Tarefas/Inbox.md").is_file());
-    assert!(dir.path().join("Tarefas/Completas.md").is_file());
+    assert!(dir.path().join("Tasks/Inbox.md").is_file());
+    assert!(dir.path().join("Tasks/Completed.md").is_file());
 }
 
 #[test]
@@ -68,7 +68,7 @@ fn open_does_not_touch_lists_that_already_have_content() {
     let dir = tempfile::tempdir().unwrap();
     Notebook::init(dir.path()).unwrap();
 
-    let inbox_path = dir.path().join("Tarefas/Inbox.md");
+    let inbox_path = dir.path().join("Tasks/Inbox.md");
     let content = "- [ ] Comprar leite <!--id:a1b2c3-->\n";
     std::fs::write(&inbox_path, content).unwrap();
 
@@ -85,7 +85,7 @@ fn adding_a_task_writes_it_to_the_file_with_an_id() {
     let id = inbox.add_text("Comprar leite");
     inbox.save().unwrap();
 
-    let on_disk = read(dir.path().join("Tarefas/Inbox.md"));
+    let on_disk = read(dir.path().join("Tasks/Inbox.md"));
     assert!(on_disk.contains("- [ ] Comprar leite"));
     assert!(on_disk.contains(&format!("id:{id}")));
 
@@ -133,7 +133,7 @@ fn moving_a_task_preserves_the_id_and_records_the_origin() {
     compras.save().unwrap();
 
     let moved = notebook
-        .move_task(&id, "Compras", "Completas", OriginAction::Record)
+        .move_task(&id, "Compras", "Completed", OriginAction::Record)
         .unwrap();
 
     assert_eq!(moved.id.as_deref(), Some(id.as_str()));
@@ -146,7 +146,7 @@ fn moving_a_task_preserves_the_id_and_records_the_origin() {
     assert_eq!(task.text, "Comprar leite");
     assert_eq!(task.origin.as_deref(), Some("Compras"));
 
-    assert!(read(dir.path().join("Tarefas/Completas.md")).contains("origin:Compras"));
+    assert!(read(dir.path().join("Tasks/Completed.md")).contains("origin:Compras"));
 }
 
 #[test]
@@ -160,16 +160,16 @@ fn moving_a_task_back_can_clear_the_origin() {
     compras.save().unwrap();
 
     notebook
-        .move_task(&id, "Compras", "Completas", OriginAction::Record)
+        .move_task(&id, "Compras", "Completed", OriginAction::Record)
         .unwrap();
     let back = notebook
-        .move_task(&id, "Completas", "Compras", OriginAction::Clear)
+        .move_task(&id, "Completed", "Compras", OriginAction::Clear)
         .unwrap();
 
     assert_eq!(back.origin, None);
     assert!(notebook.completed().unwrap().find(&id).is_none());
     assert!(notebook.open_list("Compras").unwrap().find(&id).is_some());
-    assert!(!read(dir.path().join("Tarefas/Compras.md")).contains("origin:"));
+    assert!(!read(dir.path().join("Tasks/Compras.md")).contains("origin:"));
 }
 
 #[test]
@@ -177,7 +177,7 @@ fn moving_a_task_does_not_disturb_the_other_lines() {
     let dir = tempfile::tempdir().unwrap();
     let notebook = Notebook::init(dir.path()).unwrap();
 
-    let inbox_path = dir.path().join("Tarefas/Inbox.md");
+    let inbox_path = dir.path().join("Tasks/Inbox.md");
     std::fs::write(
         &inbox_path,
         "# Inbox\n\
@@ -188,7 +188,7 @@ fn moving_a_task_does_not_disturb_the_other_lines() {
     .unwrap();
 
     notebook
-        .move_task("bbb222", "Inbox", "Completas", OriginAction::Record)
+        .move_task("bbb222", "Inbox", "Completed", OriginAction::Record)
         .unwrap();
 
     let inbox = read(&inbox_path);
@@ -206,9 +206,9 @@ fn creating_and_listing_lists() {
     notebook.create_list("Projeto Y").unwrap();
 
     let names = notebook.list_names().unwrap();
-    assert_eq!(names, vec!["Completas", "Compras", "Inbox", "Projeto Y"]);
+    assert_eq!(names, vec!["Completed", "Compras", "Inbox", "Projeto Y"]);
 
-    assert!(dir.path().join("Tarefas/Projeto Y.md").is_file());
+    assert!(dir.path().join("Tasks/Projeto Y.md").is_file());
     assert!(
         notebook.create_list("Compras").is_err(),
         "creating a duplicate list should fail"
@@ -233,7 +233,7 @@ fn tasks_written_by_hand_are_adopted_with_ids() {
     let dir = tempfile::tempdir().unwrap();
     Notebook::init(dir.path()).unwrap();
 
-    let inbox_path = dir.path().join("Tarefas/Inbox.md");
+    let inbox_path = dir.path().join("Tasks/Inbox.md");
     std::fs::write(
         &inbox_path,
         "- [ ] escrita no Obsidian\n- [ ] já tinha id <!--id:aaa111-->\n",
@@ -261,7 +261,7 @@ fn saving_is_atomic_and_leaves_no_temp_file_behind() {
     inbox.add(Task::new("Comprar leite"));
     inbox.save().unwrap();
 
-    let leftovers: Vec<_> = std::fs::read_dir(dir.path().join("Tarefas"))
+    let leftovers: Vec<_> = std::fs::read_dir(dir.path().join("Tasks"))
         .unwrap()
         .filter_map(|e| e.ok())
         .map(|e| e.file_name().to_string_lossy().to_string())
@@ -283,12 +283,12 @@ fn a_full_round_trip_through_the_notebook() {
 
     // complete
     notebook
-        .move_task(&id, "Compras", "Completas", OriginAction::Record)
+        .move_task(&id, "Compras", "Completed", OriginAction::Record)
         .unwrap();
     let mut completed = notebook.completed().unwrap();
     completed.set_done(&id, true).unwrap();
     completed.save().unwrap();
-    assert!(read(dir.path().join("Tarefas/Completas.md")).contains("- [x] Comprar leite"));
+    assert!(read(dir.path().join("Tasks/Completed.md")).contains("- [x] Comprar leite"));
 
     // undo, back to the recorded origin
     let origin = notebook
@@ -302,13 +302,13 @@ fn a_full_round_trip_through_the_notebook() {
     assert_eq!(origin, "Compras");
 
     notebook
-        .move_task(&id, "Completas", &origin, OriginAction::Clear)
+        .move_task(&id, "Completed", &origin, OriginAction::Clear)
         .unwrap();
     let mut compras = notebook.open_list("Compras").unwrap();
     compras.set_done(&id, false).unwrap();
     compras.save().unwrap();
 
-    let final_state = read(dir.path().join("Tarefas/Compras.md"));
+    let final_state = read(dir.path().join("Tasks/Compras.md"));
     assert!(final_state.contains("- [ ] Comprar leite"));
-    assert!(read(dir.path().join("Tarefas/Completas.md")).trim().is_empty());
+    assert!(read(dir.path().join("Tasks/Completed.md")).trim().is_empty());
 }
