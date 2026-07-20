@@ -13,12 +13,18 @@ use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, TryRecvError};
 use std::time::Duration;
 
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher as _};
+use serde::Serialize;
 
 use crate::error::{Error, Result};
 use crate::{NOTEBOOK_CONFIG_DIR, TASKS_DIR};
 
 /// Which part of the notebook changed.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Serialized as `{ "kind": "list", "path": "..." }`, since the app listens
+/// for these over the Tauri event bridge. The tags are part of the contract
+/// with the frontend.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
 pub enum Change {
     /// A task list under `Tarefas/`.
     List { path: PathBuf },
@@ -182,6 +188,22 @@ mod tests {
             Change::classify(root.join("Notas/Ideias.md"), &config_dir, &tasks_dir),
             Some(Change::Other { .. })
         ));
+    }
+
+    #[test]
+    fn change_serializes_with_the_tags_the_frontend_listens_for() {
+        let change = Change::List {
+            path: PathBuf::from("/caderno/Tarefas/Inbox.md"),
+        };
+        let json: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&change).unwrap()).unwrap();
+
+        assert_eq!(json["kind"], "list");
+        assert_eq!(json["path"], "/caderno/Tarefas/Inbox.md");
+        assert_eq!(
+            serde_json::to_value(Change::Config).unwrap()["kind"],
+            "config"
+        );
     }
 
     #[test]

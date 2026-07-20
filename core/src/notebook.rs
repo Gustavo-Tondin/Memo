@@ -195,6 +195,20 @@ impl Notebook {
         TaskList::load(self.list_path(name)?)
     }
 
+    /// Tasks of a list, ready to show.
+    ///
+    /// Adopts any checkbox typed by hand outside the app: without an id the
+    /// task cannot be completed or pulled into a period, so the id is assigned
+    /// and persisted the first time the app reads the list. A read-only
+    /// notebook is shown as-is instead — adopting would be a write.
+    pub fn tasks_in(&self, list: &str) -> Result<Vec<Task>> {
+        let mut tasks = self.open_list(list)?;
+        if !self.is_read_only() && tasks.ensure_ids() > 0 {
+            tasks.save()?;
+        }
+        Ok(tasks.tasks().cloned().collect())
+    }
+
     pub fn inbox(&self) -> Result<TaskList> {
         self.open_list(INBOX_LIST)
     }

@@ -128,6 +128,56 @@ fn undoing_an_unknown_id_fails_without_touching_anything() {
     assert!(matches!(err, Error::TaskNotFound(_)));
 }
 
+// ----------------------------------------------------------------- reading
+
+#[test]
+fn reading_a_list_adopts_checkboxes_written_by_hand() {
+    // Someone adds a line in Obsidian; without an id the app could not act on
+    // it, so reading the list is what adopts it.
+    let dir = tempfile::tempdir().unwrap();
+    let notebook = Notebook::init(dir.path()).unwrap();
+    std::fs::write(
+        dir.path().join("Tarefas/Inbox.md"),
+        "# Minha lista\n\n- [ ] escrita no Obsidian\n",
+    )
+    .unwrap();
+
+    let tasks = notebook.tasks_in("Inbox").unwrap();
+    assert_eq!(tasks.len(), 1);
+    let id = tasks[0].id.clone().expect("id assigned on read");
+
+    // Persisted, and the heading the user wrote is still there.
+    let on_disk = read(dir.path().join("Tarefas/Inbox.md"));
+    assert!(on_disk.contains(&format!("id:{id}")));
+    assert!(on_disk.contains("# Minha lista"));
+
+    // And the task is now actionable.
+    notebook.complete_task("Inbox", &id).unwrap();
+}
+
+#[test]
+fn reading_a_read_only_notebook_does_not_adopt_ids() {
+    let dir = tempfile::tempdir().unwrap();
+    Notebook::init(dir.path()).unwrap();
+    std::fs::write(
+        dir.path().join("Tarefas/Inbox.md"),
+        "- [ ] sem id\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join(".memo/config.json"),
+        r#"{ "schemaVersion": 99 }"#,
+    )
+    .unwrap();
+
+    let notebook = Notebook::open(dir.path()).unwrap();
+    let tasks = notebook.tasks_in("Inbox").unwrap();
+
+    assert_eq!(tasks.len(), 1);
+    assert!(tasks[0].id.is_none(), "read-only must not write ids");
+    assert_eq!(read(dir.path().join("Tarefas/Inbox.md")), "- [ ] sem id\n");
+}
+
 // ------------------------------------------------------------------ lists
 
 #[test]

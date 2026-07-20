@@ -18,7 +18,11 @@ use crate::config::write_atomically;
 use crate::error::Result;
 
 /// Which period a state file describes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// The serialized names cross the bridge to the frontend, so they are part of
+/// the app's contract and not free to rename.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Period {
     Day,
     Week,
@@ -172,6 +176,17 @@ mod tests {
     fn file_names_match_the_spec() {
         assert_eq!(Period::Day.file_name(), "daily-state.json");
         assert_eq!(Period::Week.file_name(), "weekly-state.json");
+    }
+
+    #[test]
+    fn period_serializes_with_the_names_the_frontend_uses() {
+        // Renaming these silently breaks every invoke() call from the app.
+        assert_eq!(serde_json::to_string(&Period::Day).unwrap(), "\"day\"");
+        assert_eq!(serde_json::to_string(&Period::Week).unwrap(), "\"week\"");
+        assert_eq!(
+            serde_json::from_str::<Period>("\"week\"").unwrap(),
+            Period::Week
+        );
     }
 
     #[test]
