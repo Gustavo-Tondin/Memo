@@ -387,6 +387,102 @@ fn carry_mode_keeps_the_pulled_tasks_across_the_turn() {
     assert_eq!(rolled.state.date, reopened.today());
 }
 
+// ------------------------------------------------------------- sugestões
+
+#[test]
+fn the_day_suggests_the_week_first_then_the_other_lists() {
+    let dir = tempfile::tempdir().unwrap();
+    let notebook = Notebook::init(dir.path()).unwrap();
+    notebook.create_list("Compras").unwrap();
+
+    let mut inbox = notebook.inbox().unwrap();
+    let solta = inbox.add_text("Tarefa solta");
+    inbox.save().unwrap();
+
+    let mut compras = notebook.open_list("Compras").unwrap();
+    let da_semana = compras.add_text("Escolhida pra semana");
+    compras.save().unwrap();
+
+    notebook
+        .pull_into(Period::Week, "Compras", &da_semana)
+        .unwrap();
+
+    let suggestions = notebook.suggestions_for(Period::Day).unwrap();
+    let ids: Vec<_> = suggestions
+        .iter()
+        .map(|s| s.task.id.clone().unwrap())
+        .collect();
+
+    // What the user already chose for the week comes first.
+    assert_eq!(ids, vec![da_semana.clone(), solta]);
+    assert_eq!(suggestions[0].list, "Compras");
+}
+
+#[test]
+fn a_task_already_pulled_is_not_suggested_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let (notebook, id) = notebook_with_task(dir.path(), "Comprar leite");
+
+    assert_eq!(notebook.suggestions_for(Period::Day).unwrap().len(), 1);
+    notebook.pull_into(Period::Day, "Inbox", &id).unwrap();
+    assert!(notebook.suggestions_for(Period::Day).unwrap().is_empty());
+}
+
+#[test]
+fn completed_tasks_are_never_suggested() {
+    let dir = tempfile::tempdir().unwrap();
+    let (notebook, id) = notebook_with_task(dir.path(), "Comprar leite");
+
+    notebook.complete_task("Inbox", &id).unwrap();
+
+    assert!(notebook.suggestions_for(Period::Day).unwrap().is_empty());
+    assert!(notebook.suggestions_for(Period::Week).unwrap().is_empty());
+}
+
+#[test]
+fn the_week_suggests_from_the_lists_only() {
+    // The week is not fed by the day — pulling into today does not remove a
+    // task from the week's suggestions.
+    let dir = tempfile::tempdir().unwrap();
+    let (notebook, id) = notebook_with_task(dir.path(), "Comprar leite");
+
+    notebook.pull_into(Period::Day, "Inbox", &id).unwrap();
+
+    let week = notebook.suggestions_for(Period::Week).unwrap();
+    assert_eq!(week.len(), 1);
+    assert_eq!(week[0].task.id.as_deref(), Some(id.as_str()));
+}
+
+#[test]
+fn period_tasks_resolves_references_to_real_tasks() {
+    let dir = tempfile::tempdir().unwrap();
+    let notebook = Notebook::init(dir.path()).unwrap();
+    notebook.create_list("Compras").unwrap();
+
+    let mut compras = notebook.open_list("Compras").unwrap();
+    let id = compras.add_text("Comprar leite");
+    compras.save().unwrap();
+    notebook.pull_into(Period::Day, "Compras", &id).unwrap();
+
+    let pulled = notebook.period_tasks(Period::Day).unwrap();
+    assert_eq!(pulled.len(), 1);
+    assert_eq!(pulled[0].list, "Compras");
+    assert_eq!(pulled[0].task.text, "Comprar leite");
+}
+
+#[test]
+fn a_reference_to_a_task_deleted_elsewhere_is_skipped() {
+    // The notebook is shared with other editors; a stale reference is normal.
+    let dir = tempfile::tempdir().unwrap();
+    let (notebook, id) = notebook_with_task(dir.path(), "Comprar leite");
+    notebook.pull_into(Period::Day, "Inbox", &id).unwrap();
+
+    // Someone deletes the line in Obsidian.
+    std::fs::write(dir.path().join("Tarefas/Inbox.md"), "").unwrap();
+
+    assert!(notebook.period_tasks(Period::Day).unwrap().is_empty());
+}
+
 // -------------------------------------------------------------- read-only
 
 #[test]

@@ -41,6 +41,17 @@ pub enum OriginAction {
     Keep,
 }
 
+/// A task together with the list it lives in.
+///
+/// Day and Week show tasks from several lists at once, so the list name has
+/// to travel with the task — without it the UI could not tell the core which
+/// file to act on.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct ListedTask {
+    pub list: String,
+    pub task: Task,
+}
+
 /// An open notebook.
 #[derive(Debug, Clone)]
 pub struct Notebook {
@@ -485,6 +496,80 @@ impl Notebook {
         file.state.add(INBOX_LIST, &id);
         file.save()?;
         Ok(id)
+    }
+
+    /// The tasks actually pulled into a period, in the order they were pulled.
+    ///
+    /// A reference whose task no longer exists (deleted in another editor) is
+    /// skipped instead of failing: the notebook is shared with other tools, so
+    /// a stale reference is a normal state, not corruption.
+    pub fn period_tasks(&self, period: Period) -> Result<Vec<ListedTask>> {
+        let state = self.open_state(period)?.state;
+        let mut out = Vec::new();
+
+        for reference in &state.items {
+            let Ok(list) = self.open_list(&reference.list) else {
+                continue;
+            };
+            if let Some(task) = list.find(&reference.id) {
+                out.push(ListedTask {
+                    list: reference.list.clone(),
+                    task: task.clone(),
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    /// What to offer pulling into a period, in the order the UI shows it.
+    ///
+    /// For the day, tasks already chosen for the week come first: they are
+    /// what the user decided mattered this week, so they are the best
+    /// candidates for today. Everything else in the lists follows.
+    ///
+    /// Anything already pulled into the period is left out, and so are
+    /// completed tasks and the `Completas` list itself.
+    pub fn suggestions_for(&self, period: Period) -> Result<Vec<ListedTask>> {
+        let pulled = self.open_state(period)?.state;
+        let mut out: Vec<ListedTask> = Vec::new();
+
+        let push = |candidate: ListedTask, out: &mut Vec<ListedTask>| {
+            let Some(id) = candidate.task.id.as_deref() else {
+                return;
+            };
+            if candidate.task.done || pulled.contains(&candidate.list, id) {
+                return;
+            }
+            let already = out
+                .iter()
+                .any(|t| t.list == candidate.list && t.task.id.as_deref() == Some(id));
+            if !already {
+                out.push(candidate);
+            }
+        };
+
+        // The week feeds the day, but nothing feeds the week except the lists.
+        if period == Period::Day {
+            for candidate in self.period_tasks(Period::Week)? {
+                push(candidate, &mut out);
+            }
+        }
+
+        for name in self.list_names()? {
+            if name == COMPLETED_LIST {
+                continue;
+            }
+            for task in self.tasks_in(&name)? {
+                push(
+                    ListedTask {
+                        list: name.clone(),
+                        task,
+                    },
+                    &mut out,
+                );
+            }
+        }
+        Ok(out)
     }
 
     // ------------------------------------------------------- complete / undo

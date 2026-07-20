@@ -1,215 +1,320 @@
 <script>
-  import { invoke } from "@tauri-apps/api/core";
+  // Phase 4: the app is usable end to end, still without design.
+  // Everything visual here is placeholder — phase 5 rebuilds it from Figma.
   import { listen } from "@tauri-apps/api/event";
+  import { api, describeError } from "./lib/api.js";
+  import ListView from "./lib/ListView.svelte";
+  import PeriodView from "./lib/PeriodView.svelte";
+  import CompletedView from "./lib/CompletedView.svelte";
 
-  // Phase 3 bench: proves every bridge command answers what it should.
-  // There is no design here on purpose — the roadmap only starts styling at
-  // phase 5, and phase 4 replaces this file with the real screens.
+  const COMPLETED = "Completas";
 
   let notebook = $state(null);
-  let log = $state([]);
-  let running = $state(false);
+  let clock = $state(null);
+  let view = $state({ kind: "period", period: "day" });
+  let error = $state(null);
+  let busy = $state(true);
+  /// Bumped to tell the open screen to re-read from disk.
+  let reloadKey = $state(0);
 
-  function note(label, value) {
-    const line = {
-      label,
-      value: JSON.stringify(value),
-      at: new Date().toLocaleTimeString(),
-    };
-    console.log(`[memo] ${label}`, value);
-    log = [line, ...log].slice(0, 200);
-  }
-
-  function fail(label, error) {
-    console.error(`[memo] ${label} failed`, error);
-    log = [
-      {
-        label: `${label} — ERRO`,
-        value: JSON.stringify(error),
-        at: new Date().toLocaleTimeString(),
-      },
-      ...log,
-    ];
-  }
-
-  async function call(label, command, args) {
-    const value = await invoke(command, args);
-    note(label, value);
-    return value;
-  }
-
-  // External changes (Syncthing, Obsidian) arrive as events, not polling.
-  listen("notebook://changed", (event) =>
-    note("evento notebook://changed", event.payload),
+  let userLists = $derived(
+    (notebook?.lists ?? []).filter((name) => name !== COMPLETED),
   );
 
-  async function chooseNotebook() {
-    try {
-      const path = await invoke("pick_notebook_folder");
-      if (!path) return note("seletor de pasta", "cancelado");
-      notebook = await call("open_notebook", "open_notebook", { path });
-    } catch (e) {
-      fail("open_notebook", e);
-    }
+  function fail(e) {
+    error = describeError(e);
+    console.error("[memo]", e);
   }
 
-  // Walks every command in order, against the open notebook.
-  async function runBench() {
-    if (!notebook) return;
-    running = true;
-    log = [];
+  const reload = () => (reloadKey += 1);
+
+  async function refreshNotebook() {
+    notebook = await api.currentNotebook();
+    if (notebook) clock = await api.periodClock();
+  }
+
+  async function openAt(path) {
+    busy = true;
+    error = null;
     try {
-      await call("core_version", "core_version");
-      await call("current_notebook", "current_notebook");
-      await call("period_clock", "period_clock");
-      await call("notebook_settings", "notebook_settings");
-
-      const listName = `Bench ${Date.now() % 100000}`;
-      await call("create_list", "create_list", { name: listName });
-      await call("list_names", "list_names");
-
-      const id = await call("create_task", "create_task", {
-        list: listName,
-        text: "tarefa de teste",
-      });
-      await call("edit_task_text", "edit_task_text", {
-        list: listName,
-        id,
-        text: "tarefa editada",
-      });
-      await call("list_tasks", "list_tasks", { list: listName });
-
-      await call("pull_into_period (week)", "pull_into_period", {
-        period: "week",
-        list: listName,
-        id,
-      });
-      await call("pull_into_period (day)", "pull_into_period", {
-        period: "day",
-        list: listName,
-        id,
-      });
-      await call("period_state (day)", "period_state", { period: "day" });
-
-      const inboxId = await call("add_task_in_period", "add_task_in_period", {
-        period: "day",
-        text: "criada no dia",
-      });
-      await call("remove_from_period", "remove_from_period", {
-        period: "day",
-        list: "Inbox",
-        id: inboxId,
-      });
-
-      await call("complete_task", "complete_task", { list: listName, id });
-      await call("period_state após completar", "period_state", {
-        period: "day",
-      });
-      await call("list_tasks (Completas)", "list_tasks", { list: "Completas" });
-      await call("uncomplete_task", "uncomplete_task", { id });
-      await call("list_tasks após desfazer", "list_tasks", { list: listName });
-
-      const renamed = `${listName} renomeada`;
-      await call("rename_list", "rename_list", { from: listName, to: renamed });
-      await call("delete_list", "delete_list", { name: renamed });
-
-      await call("refresh_periods", "refresh_periods");
-
-      // Errors must arrive typed, not as an opaque string.
-      try {
-        await invoke("complete_task", { list: "Inbox", id: "nao-existe" });
-      } catch (e) {
-        note("erro esperado (taskNotFound)", e);
-      }
-      try {
-        await invoke("delete_list", { name: "Inbox" });
-      } catch (e) {
-        note("erro esperado (protectedList)", e);
-      }
-
-      note("SUÍTE COMPLETA", "todos os comandos responderam");
+      notebook = await api.openNotebook(path);
+      clock = await api.periodClock();
+      scheduleTurn();
+      reload();
     } catch (e) {
-      fail("suíte", e);
+      fail(e);
     } finally {
-      running = false;
-      notebook = await invoke("current_notebook");
+      busy = false;
     }
   }
 
-  invoke("current_notebook").then((nb) => {
-    notebook = nb;
-    note("current_notebook (inicial)", nb);
+  async function chooseFolder() {
+    try {
+      const path = await api.pickFolder();
+      if (path) await openAt(path);
+    } catch (e) {
+      fail(e);
+    }
+  }
+
+  async function createList() {
+    const name = prompt("Nome da nova lista:");
+    if (!name) return;
+    try {
+      await api.createList(name.trim());
+      await refreshNotebook();
+      view = { kind: "list", list: name.trim() };
+    } catch (e) {
+      fail(e);
+    }
+  }
+
+  async function renameCurrentList() {
+    if (view.kind !== "list") return;
+    const to = prompt(`Novo nome para "${view.list}":`, view.list);
+    if (!to || to === view.list) return;
+    try {
+      await api.renameList(view.list, to.trim());
+      await refreshNotebook();
+      view = { kind: "list", list: to.trim() };
+      reload();
+    } catch (e) {
+      fail(e);
+    }
+  }
+
+  async function deleteCurrentList() {
+    if (view.kind !== "list") return;
+    const list = view.list;
+    if (!confirm(`Apagar "${list}"? As tarefas restantes vão para a Inbox.`))
+      return;
+    try {
+      const rescued = await api.deleteList(list);
+      await refreshNotebook();
+      view = { kind: "list", list: "Inbox" };
+      reload();
+      if (rescued > 0) {
+        error = `${rescued} tarefa(s) de "${list}" foram movidas para a Inbox.`;
+      }
+    } catch (e) {
+      fail(e);
+    }
+  }
+
+  // The rollover has to happen with the app open too, not only when the
+  // notebook is reopened. The core says when; this schedules the wake-up.
+  let turnTimer = null;
+  async function scheduleTurn() {
+    if (turnTimer) clearTimeout(turnTimer);
+    if (!clock) return;
+
+    const next = Math.min(
+      new Date(clock.nextDailyTurn).getTime(),
+      new Date(clock.nextWeeklyTurn).getTime(),
+    );
+    // Cap the wait: a long sleep or a clock jump would otherwise leave the
+    // screen showing yesterday until something else refreshed it.
+    const delay = Math.min(Math.max(next - Date.now(), 1000), 60 * 60 * 1000);
+
+    turnTimer = setTimeout(async () => {
+      try {
+        await api.refreshPeriods();
+        clock = await api.periodClock();
+        reload();
+      } catch (e) {
+        fail(e);
+      }
+      scheduleTurn();
+    }, delay);
+  }
+
+  // Someone else wrote to the notebook (Syncthing, Obsidian, a text editor).
+  listen("notebook://changed", async (event) => {
+    const kind = event.payload?.kind;
+    if (kind === "list") await refreshNotebook();
+    reload();
   });
+
+  // Reopen the last notebook so the app is usable straight away.
+  (async () => {
+    try {
+      const last = await api.lastNotebook();
+      if (last) await openAt(last);
+      else await refreshNotebook();
+    } catch (e) {
+      fail(e);
+    } finally {
+      busy = false;
+    }
+  })();
 </script>
 
 <main>
-  <h1>Memo — banco de testes da ponte (Fase 3)</h1>
-
-  <div class="row">
-    <button onclick={chooseNotebook}>Escolher pasta do caderno…</button>
-    <button onclick={runBench} disabled={!notebook || running}>
-      {running ? "rodando…" : "Rodar suíte de comandos"}
-    </button>
-  </div>
-
-  {#if notebook}
-    <p class="notebook">
-      Caderno: <strong>{notebook.name}</strong> — {notebook.path}
-      {#if notebook.readOnly}<span class="ro">somente leitura</span>{/if}
-      <br />Listas: {notebook.lists.join(", ")}
-    </p>
+  {#if !notebook}
+    <section class="onboarding">
+      <h1>Memo</h1>
+      <p>
+        Escolha uma pasta para ser o seu caderno. Se ela ainda não for um
+        caderno, o Memo cria a estrutura dentro dela — seus arquivos continuam
+        sendo `.md` comuns, legíveis em qualquer editor.
+      </p>
+      <button onclick={chooseFolder} disabled={busy}>
+        Escolher pasta do caderno…
+      </button>
+      {#if error}<p class="error">{error}</p>{/if}
+    </section>
   {:else}
-    <p class="notebook">Nenhum caderno aberto. Escolha uma pasta para começar.</p>
-  {/if}
+    <div class="app">
+      <nav>
+        <div class="notebook" title={notebook.path}>
+          <strong>{notebook.name}</strong>
+          {#if notebook.readOnly}<span class="ro">somente leitura</span>{/if}
+        </div>
 
-  <ol class="log">
-    {#each log as line}
-      <li>
-        <span class="time">{line.at}</span>
-        <span class="label">{line.label}</span>
-        <code>{line.value}</code>
-      </li>
-    {/each}
-  </ol>
+        <button
+          class:active={view.kind === "period" && view.period === "day"}
+          onclick={() => (view = { kind: "period", period: "day" })}>Hoje</button
+        >
+        <button
+          class:active={view.kind === "period" && view.period === "week"}
+          onclick={() => (view = { kind: "period", period: "week" })}
+          >Semana</button
+        >
+
+        <hr />
+        {#each userLists as list}
+          <button
+            class:active={view.kind === "list" && view.list === list}
+            onclick={() => (view = { kind: "list", list })}>{list}</button
+          >
+        {/each}
+
+        <hr />
+        <button
+          class:active={view.kind === "completed"}
+          onclick={() => (view = { kind: "completed" })}>Completas</button
+        >
+
+        {#if !notebook.readOnly}
+          <button class="secondary" onclick={createList}>+ nova lista</button>
+        {/if}
+        <button class="secondary" onclick={chooseFolder}>trocar caderno…</button>
+      </nav>
+
+      <section class="content">
+        {#if error}
+          <p class="error">{error} <button onclick={() => (error = null)}>ok</button></p>
+        {/if}
+
+        {#if view.kind === "period"}
+          <PeriodView
+            period={view.period}
+            {clock}
+            readOnly={notebook.readOnly}
+            onChanged={refreshNotebook}
+            onError={fail}
+            {reloadKey}
+          />
+        {:else if view.kind === "list"}
+          <ListView
+            list={view.list}
+            readOnly={notebook.readOnly}
+            onChanged={refreshNotebook}
+            onError={fail}
+            {reloadKey}
+          />
+          {#if !notebook.readOnly && view.list !== "Inbox"}
+            <p class="list-actions">
+              <button onclick={renameCurrentList}>renomear lista</button>
+              <button onclick={deleteCurrentList}>apagar lista</button>
+            </p>
+          {/if}
+        {:else}
+          <CompletedView
+            readOnly={notebook.readOnly}
+            onChanged={refreshNotebook}
+            onError={fail}
+            {reloadKey}
+          />
+        {/if}
+      </section>
+    </div>
+  {/if}
 </main>
 
 <style>
-  /* Deliberately plain: this screen exists to read output, not to look good. */
+  /* Structural only. The real design lands in phase 5. */
   main {
     font-family: system-ui, sans-serif;
-    padding: 1rem;
-    max-width: 60rem;
-    margin: 0 auto;
+    height: 100vh;
   }
-  .row {
+  .onboarding {
+    max-width: 32rem;
+    margin: 4rem auto;
+    padding: 1rem;
+  }
+  .app {
+    display: grid;
+    grid-template-columns: 14rem 1fr;
+    height: 100%;
+  }
+  nav {
     display: flex;
-    gap: 0.5rem;
-    flex-wrap: wrap;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.25rem;
+    padding: 0.75rem;
+    border-right: 1px solid #ccc;
+    overflow-y: auto;
+  }
+  nav button {
+    text-align: left;
+    padding: 0.35rem 0.5rem;
+    background: none;
+    border: none;
+    border-radius: 4px;
+    font: inherit;
+    cursor: pointer;
+  }
+  nav button:hover {
+    background: #eee;
+  }
+  nav button.active {
+    background: #ddd;
+    font-weight: 600;
+  }
+  nav button.secondary {
+    color: #555;
+    font-size: 0.85rem;
   }
   .notebook {
+    padding: 0.25rem 0.5rem 0.5rem;
     font-size: 0.9rem;
   }
   .ro {
+    display: block;
     color: #b00;
-    font-weight: bold;
-  }
-  .log {
     font-size: 0.8rem;
-    line-height: 1.5;
-    padding-left: 1.5rem;
   }
-  .log li {
-    margin-bottom: 0.25rem;
+  .content {
+    padding: 1rem;
+    overflow-y: auto;
   }
-  .time {
-    color: #888;
-    margin-right: 0.5rem;
+  .error {
+    background: #fee;
+    border: 1px solid #f99;
+    padding: 0.5rem;
+    border-radius: 4px;
   }
-  .label {
-    font-weight: 600;
-    margin-right: 0.5rem;
+  .list-actions {
+    margin-top: 2rem;
+    display: flex;
+    gap: 0.5rem;
   }
-  code {
-    word-break: break-all;
+  hr {
+    border: none;
+    border-top: 1px solid #ddd;
+    width: 100%;
+    margin: 0.25rem 0;
   }
 </style>

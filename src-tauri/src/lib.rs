@@ -6,6 +6,7 @@
 
 pub mod commands;
 pub mod error;
+pub mod prefs;
 pub mod state;
 
 use state::AppState;
@@ -26,6 +27,7 @@ pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
             commands::pick_notebook_folder,
             commands::open_notebook,
             commands::current_notebook,
+            commands::last_notebook,
             commands::notebook_settings,
             commands::set_notebook_settings,
             // lists
@@ -41,6 +43,8 @@ pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
             commands::uncomplete_task,
             // day and week
             commands::period_state,
+            commands::period_tasks,
+            commands::period_suggestions,
             commands::period_clock,
             commands::pull_into_period,
             commands::remove_from_period,

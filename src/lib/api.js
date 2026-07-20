@@ -1,0 +1,45 @@
+// Every call into Rust goes through here.
+//
+// One place to see the whole surface, and one place to fix when a command
+// changes. Nothing in this file decides anything — it just names the bridge.
+
+import { invoke } from "@tauri-apps/api/core";
+
+export const api = {
+  // notebook
+  lastNotebook: () => invoke("last_notebook"),
+  pickFolder: () => invoke("pick_notebook_folder"),
+  openNotebook: (path) => invoke("open_notebook", { path }),
+  currentNotebook: () => invoke("current_notebook"),
+
+  // lists
+  listNames: () => invoke("list_names"),
+  listTasks: (list) => invoke("list_tasks", { list }),
+  createList: (name) => invoke("create_list", { name }),
+  renameList: (from, to) => invoke("rename_list", { from, to }),
+  deleteList: (name) => invoke("delete_list", { name }),
+
+  // tasks
+  createTask: (list, text) => invoke("create_task", { list, text }),
+  editTaskText: (list, id, text) => invoke("edit_task_text", { list, id, text }),
+  completeTask: (list, id) => invoke("complete_task", { list, id }),
+  uncompleteTask: (id) => invoke("uncomplete_task", { id }),
+
+  // day and week
+  periodTasks: (period) => invoke("period_tasks", { period }),
+  periodSuggestions: (period) => invoke("period_suggestions", { period }),
+  pullInto: (period, list, id) => invoke("pull_into_period", { period, list, id }),
+  removeFrom: (period, list, id) =>
+    invoke("remove_from_period", { period, list, id }),
+  addTaskInPeriod: (period, text) => invoke("add_task_in_period", { period, text }),
+  periodClock: () => invoke("period_clock"),
+  refreshPeriods: () => invoke("refresh_periods"),
+};
+
+/// Errors cross the bridge as { kind, message }; anything else is a bug.
+export function describeError(error) {
+  if (error && typeof error === "object" && "kind" in error) {
+    return `${error.kind}: ${error.message}`;
+  }
+  return String(error);
+}

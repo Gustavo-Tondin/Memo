@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use memo_core::config::{Config, RolloverMode};
 use memo_core::state::{Period, PeriodState};
-use memo_core::{Notebook, Task, TurnOffset, WeekStart};
+use memo_core::{ListedTask, Notebook, Task, TurnOffset, WeekStart};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Runtime, State};
 use tauri_plugin_dialog::DialogExt;
@@ -80,7 +80,16 @@ pub fn open_notebook<R: Runtime>(
     let notebook = Notebook::open_or_init(&path)?;
     let info = NotebookInfo::of(&notebook)?;
     state.open(&app, notebook)?;
+    crate::prefs::remember_notebook(&app, &path);
     Ok(info)
+}
+
+/// The notebook open when the app was last closed, so onboarding can reopen
+/// it instead of asking for the folder every launch. `None` when there is
+/// none, or when the folder is gone.
+#[tauri::command]
+pub fn last_notebook<R: Runtime>(app: AppHandle<R>) -> Option<PathBuf> {
+    crate::prefs::last_notebook(&app)
 }
 
 /// The notebook currently open, if any.
@@ -241,6 +250,24 @@ pub fn add_task_in_period(
     text: String,
 ) -> CommandResult<String> {
     state.with_notebook(|nb| Ok(nb.add_task_in_period(period, text)?))
+}
+
+/// The tasks pulled into a period, resolved to the real thing.
+#[tauri::command]
+pub fn period_tasks(
+    state: State<'_, AppState>,
+    period: Period,
+) -> CommandResult<Vec<ListedTask>> {
+    state.with_notebook(|nb| Ok(nb.period_tasks(period)?))
+}
+
+/// What to offer pulling into a period, already in display order.
+#[tauri::command]
+pub fn period_suggestions(
+    state: State<'_, AppState>,
+    period: Period,
+) -> CommandResult<Vec<ListedTask>> {
+    state.with_notebook(|nb| Ok(nb.suggestions_for(period)?))
 }
 
 /// The current logical day and week, and when each turns next. The UI needs

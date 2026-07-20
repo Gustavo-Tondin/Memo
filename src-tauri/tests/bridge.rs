@@ -315,6 +315,53 @@ fn refresh_periods_returns_both_states() {
 }
 
 #[test]
+fn the_day_offers_the_week_first_then_the_rest() {
+    let (app, _dir) = app_with_notebook();
+    ok(&app, "create_list", json!({ "name": "Compras" }));
+
+    let solta = ok(
+        &app,
+        "create_task",
+        json!({ "list": "Inbox", "text": "Tarefa solta" }),
+    );
+    let semana = ok(
+        &app,
+        "create_task",
+        json!({ "list": "Compras", "text": "Escolhida pra semana" }),
+    );
+    ok(
+        &app,
+        "pull_into_period",
+        json!({ "period": "week", "list": "Compras", "id": semana }),
+    );
+
+    let suggestions = ok(&app, "period_suggestions", json!({ "period": "day" }));
+    assert_eq!(suggestions[0]["task"]["id"], semana);
+    assert_eq!(suggestions[0]["list"], "Compras");
+    assert_eq!(suggestions[1]["task"]["id"], solta);
+
+    // Once pulled, it stops being a suggestion and shows up as pulled.
+    ok(
+        &app,
+        "pull_into_period",
+        json!({ "period": "day", "list": "Compras", "id": semana }),
+    );
+    let pulled = ok(&app, "period_tasks", json!({ "period": "day" }));
+    assert_eq!(pulled[0]["task"]["text"], "Escolhida pra semana");
+
+    let suggestions = ok(&app, "period_suggestions", json!({ "period": "day" }));
+    assert_eq!(suggestions.as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn the_last_notebook_is_remembered_across_launches() {
+    let (app, dir) = app_with_notebook();
+
+    let remembered = ok(&app, "last_notebook", json!({}));
+    assert_eq!(remembered, json!(dir.path()));
+}
+
+#[test]
 fn external_changes_reach_the_frontend_as_events() {
     // The Syncthing scenario: something else writes the file, and the app has
     // to hear about it without polling.

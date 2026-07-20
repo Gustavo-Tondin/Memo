@@ -21,7 +21,7 @@ pub use clock::{TurnOffset, WeekStart};
 pub use config::{Config, Rollover, RolloverMode};
 pub use error::{Error, Result};
 pub use list::{Line, TaskList};
-pub use notebook::{Notebook, OriginAction};
+pub use notebook::{ListedTask, Notebook, OriginAction};
 pub use state::{Period, PeriodState, StateFile, TaskRef};
 pub use watcher::{Change, NotebookWatcher};
 pub use task::Task;
