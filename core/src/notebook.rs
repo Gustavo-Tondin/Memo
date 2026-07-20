@@ -5,6 +5,9 @@
 //! ```text
 //! MeuCaderno/
 //! ├── .memo/
+//! │   ├── config.json
+//! │   ├── daily-state.json
+//! │   └── weekly-state.json
 //! ├── Tarefas/
 //! │   ├── Inbox.md
 //! │   └── Completas.md
@@ -13,15 +16,21 @@
 
 use std::path::{Path, PathBuf};
 
+use chrono::NaiveDate;
+
+use crate::clock;
+use crate::config::{Config, RolloverMode};
 use crate::error::{Error, IoContext, Result};
 use crate::list::TaskList;
+use crate::rollover;
+use crate::state::{Period, StateFile};
 use crate::task::Task;
-use crate::{INBOX_LIST, COMPLETED_LIST, NOTEBOOK_CONFIG_DIR, NOTES_DIR, TASKS_DIR};
+use crate::{COMPLETED_LIST, INBOX_LIST, NOTEBOOK_CONFIG_DIR, NOTES_DIR, TASKS_DIR};
 
 /// What to do with a task's `origin` field when moving it between lists.
 ///
 /// The writer stays mechanical on purpose — deciding *when* to record an
-/// origin is business logic, and it lives in the caller (phase 2).
+/// origin is business logic, and it lives in the caller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OriginAction {
     /// Record the source list, so the move can be undone later.
@@ -36,6 +45,7 @@ pub enum OriginAction {
 #[derive(Debug, Clone)]
 pub struct Notebook {
     root: PathBuf,
+    config: Config,
 }
 
 impl Notebook {
@@ -51,8 +61,15 @@ impl Notebook {
         if !Self::is_notebook(&root) {
             return Err(Error::NotANotebook(root));
         }
-        let notebook = Self { root };
-        notebook.ensure_default_lists()?;
+
+        let config = Config::load(root.join(NOTEBOOK_CONFIG_DIR).join("config.json"));
+        let notebook = Self { root, config };
+
+        // A notebook written by a newer app is opened for reading only, so
+        // nothing here may touch the disk.
+        if !notebook.is_read_only() {
+            notebook.ensure_default_lists()?;
+        }
         Ok(notebook)
     }
 
@@ -71,13 +88,11 @@ impl Notebook {
             std::fs::create_dir_all(&dir).ctx(&dir)?;
         }
 
-        // Only the container. Preferences are added by the features that own
-        // them; the version field ships from day one because adding it after
-        // notebooks exist on disk is far more expensive.
-        let config = root.join(NOTEBOOK_CONFIG_DIR).join("config.json");
-        std::fs::write(&config, "{\n  \"schemaVersion\": 1\n}\n").ctx(&config)?;
-
-        let notebook = Self { root };
+        let notebook = Self {
+            root,
+            config: Config::default(),
+        };
+        notebook.config.save(notebook.config_path())?;
         notebook.ensure_default_lists()?;
         Ok(notebook)
     }
@@ -105,6 +120,39 @@ impl Notebook {
 
     pub fn config_dir(&self) -> PathBuf {
         self.root.join(NOTEBOOK_CONFIG_DIR)
+    }
+
+    pub fn config_path(&self) -> PathBuf {
+        self.config_dir().join("config.json")
+    }
+
+    pub fn config(&self) -> &Config {
+        &self.config
+    }
+
+    /// True when the notebook was written by a newer version of the app.
+    pub fn is_read_only(&self) -> bool {
+        self.config.is_read_only()
+    }
+
+    /// Replaces the preferences and writes them to disk.
+    pub fn set_config(&mut self, config: Config) -> Result<()> {
+        self.ensure_writable()?;
+        config.save(self.config_path())?;
+        self.config = config;
+        Ok(())
+    }
+
+    /// Guard for every operation that writes. Reading a future notebook is
+    /// fine; rewriting one is how data written by a newer app gets destroyed.
+    fn ensure_writable(&self) -> Result<()> {
+        if self.is_read_only() {
+            return Err(Error::ReadOnlyNotebook {
+                found: self.config.schema_version(),
+                supported: crate::config::SUPPORTED_SCHEMA_VERSION,
+            });
+        }
+        Ok(())
     }
 
     /// Path of a list by name. Rejects anything that could escape the tasks
@@ -155,6 +203,11 @@ impl Notebook {
         self.open_list(COMPLETED_LIST)
     }
 
+    /// Whether a list is one the app recreates on every open.
+    pub fn is_default_list(name: &str) -> bool {
+        name == INBOX_LIST || name == COMPLETED_LIST
+    }
+
     /// Recreates `Inbox.md` and `Completas.md` when missing. Called on every
     /// open: the user may have deleted them, and the app must not break.
     pub fn ensure_default_lists(&self) -> Result<()> {
@@ -171,6 +224,7 @@ impl Notebook {
 
     /// Creates a new list. Fails if one with that name already exists.
     pub fn create_list(&self, name: &str) -> Result<TaskList> {
+        self.ensure_writable()?;
         let path = self.list_path(name)?;
         if path.exists() {
             return Err(Error::InvalidListName(format!("{name} already exists")));
@@ -182,10 +236,83 @@ impl Notebook {
         TaskList::load(path)
     }
 
-    /// Moves a task between lists, preserving its id.
+    /// Renames a user list, repointing everything that referred to it: the
+    /// `origin` of completed tasks (otherwise undo would send them to a list
+    /// that no longer exists) and the day/week states.
+    pub fn rename_list(&self, from: &str, to: &str) -> Result<()> {
+        self.ensure_writable()?;
+        if Self::is_default_list(from) {
+            return Err(Error::ProtectedList(from.to_string()));
+        }
+        if Self::is_default_list(to) {
+            return Err(Error::InvalidListName(to.to_string()));
+        }
+
+        let source = self.list_path(from)?;
+        let target = self.list_path(to)?;
+        if !source.exists() {
+            return Err(Error::InvalidListName(format!("{from} does not exist")));
+        }
+        if target.exists() {
+            return Err(Error::InvalidListName(format!("{to} already exists")));
+        }
+
+        std::fs::rename(&source, &target).ctx(&target)?;
+
+        let mut completed = self.completed()?;
+        if completed.repoint_origin(from, to) > 0 {
+            completed.save()?;
+        }
+
+        for period in [Period::Day, Period::Week] {
+            let mut state = self.open_state(period)?;
+            if state.state.rename_list(from, to) {
+                state.save()?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Deletes a user list, moving whatever was still in it to the Inbox.
     ///
-    /// Both files are saved; the task is returned as it landed. This is the
-    /// primitive behind completing and un-completing a task.
+    /// Deleting a list is a filing decision, not a decision to throw work
+    /// away — principle 2, the data is the user's. An empty list disappears
+    /// silently; one with tasks leaves them in the Inbox.
+    pub fn delete_list(&self, name: &str) -> Result<usize> {
+        self.ensure_writable()?;
+        if Self::is_default_list(name) {
+            return Err(Error::ProtectedList(name.to_string()));
+        }
+
+        let path = self.list_path(name)?;
+        if !path.exists() {
+            return Err(Error::InvalidListName(format!("{name} does not exist")));
+        }
+
+        let list = TaskList::load(&path)?;
+        let mut rescued = 0;
+        let ids: Vec<String> = list.tasks().filter_map(|t| t.id.clone()).collect();
+        for id in &ids {
+            // Inbox first, then the file goes away: a crash in between leaves
+            // a duplicate, never a hole.
+            self.transfer(id, name, INBOX_LIST, OriginAction::Keep, None)?;
+            rescued += 1;
+        }
+
+        std::fs::remove_file(&path).ctx(&path)?;
+
+        for period in [Period::Day, Period::Week] {
+            let mut state = self.open_state(period)?;
+            // References now point at the Inbox copies, which carry the same
+            // ids; repointing keeps a pulled task pulled.
+            if state.state.rename_list(name, INBOX_LIST) {
+                state.save()?;
+            }
+        }
+        Ok(rescued)
+    }
+
+    /// Moves a task between lists, preserving its id.
     pub fn move_task(
         &self,
         id: &str,
@@ -193,6 +320,20 @@ impl Notebook {
         to: &str,
         origin: OriginAction,
     ) -> Result<Task> {
+        self.transfer(id, from, to, origin, None)
+    }
+
+    /// The move primitive. `done` optionally flips the checkbox in the same
+    /// write, so completing a task is one pass over each file instead of two.
+    fn transfer(
+        &self,
+        id: &str,
+        from: &str,
+        to: &str,
+        origin: OriginAction,
+        done: Option<bool>,
+    ) -> Result<Task> {
+        self.ensure_writable()?;
         let mut source = self.open_list(from)?;
         let mut target = self.open_list(to)?;
 
@@ -201,6 +342,9 @@ impl Notebook {
             OriginAction::Record => task.origin = Some(from.to_string()),
             OriginAction::Clear => task.origin = None,
             OriginAction::Keep => {}
+        }
+        if let Some(done) = done {
+            task.done = done;
         }
 
         let moved = task.clone();
@@ -211,5 +355,165 @@ impl Notebook {
         target.save()?;
         source.save()?;
         Ok(moved)
+    }
+
+    // ---------------------------------------------------------------- state
+
+    pub fn state_path(&self, period: Period) -> PathBuf {
+        self.config_dir().join(period.file_name())
+    }
+
+    /// The current logical day, honouring the configured turn.
+    pub fn today(&self) -> NaiveDate {
+        clock::today(self.config.rollover.daily.at)
+    }
+
+    /// First day of the current logical week.
+    pub fn current_week(&self) -> NaiveDate {
+        clock::this_week(
+            self.config.rollover.weekly.at,
+            self.config.rollover.weekly.starts_on,
+        )
+    }
+
+    pub fn current_period_date(&self, period: Period) -> NaiveDate {
+        match period {
+            Period::Day => self.today(),
+            Period::Week => self.current_week(),
+        }
+    }
+
+    /// When the next turn of `period` happens.
+    ///
+    /// The rollover must also fire while the app is *open*, not only when the
+    /// notebook is reopened. The core cannot own a timer without dragging in a
+    /// runtime, so it answers "when" and the app schedules the wake-up.
+    pub fn next_turn_at(&self, period: Period) -> chrono::DateTime<chrono::Local> {
+        let now = chrono::Local::now();
+        match period {
+            Period::Day => clock::next_daily_turn_at(now, self.config.rollover.daily.at),
+            Period::Week => clock::next_weekly_turn_at(
+                now,
+                self.config.rollover.weekly.at,
+                self.config.rollover.weekly.starts_on,
+            ),
+        }
+    }
+
+    /// Starts watching this notebook for changes made outside the app.
+    pub fn watch(&self) -> Result<crate::watcher::NotebookWatcher> {
+        crate::watcher::NotebookWatcher::start(&self.root)
+    }
+
+    fn rollover_mode(&self, period: Period) -> RolloverMode {
+        match period {
+            Period::Day => self.config.rollover.daily.mode,
+            Period::Week => self.config.rollover.weekly.mode,
+        }
+    }
+
+    /// Opens a state file with the rollover already applied.
+    ///
+    /// Every read goes through here, so a notebook that sat closed for a week
+    /// is up to date the moment anything looks at it — the app never has to
+    /// remember to roll over first.
+    pub fn open_state(&self, period: Period) -> Result<StateFile> {
+        let current = self.current_period_date(period);
+        let mut file = StateFile::load(self.state_path(period), current);
+
+        let rolled = rollover::apply(&mut file.state, current, self.rollover_mode(period));
+        if rolled.changed() && !self.is_read_only() {
+            file.save()?;
+        }
+        Ok(file)
+    }
+
+    /// Pulls an existing task into Today or This Week.
+    pub fn pull_into(&self, period: Period, list: &str, id: &str) -> Result<bool> {
+        self.ensure_writable()?;
+        // Fail before writing the state if the task is not really there —
+        // a reference to a missing task shows up as a ghost row in the UI.
+        let source = self.open_list(list)?;
+        if source.find(id).is_none() {
+            return Err(Error::TaskNotFound(id.to_string()));
+        }
+
+        let mut file = self.open_state(period)?;
+        if !file.state.add(list, id) {
+            return Ok(false);
+        }
+        file.save()?;
+        Ok(true)
+    }
+
+    /// Removes a task from Today or This Week. The task itself is untouched.
+    pub fn remove_from(&self, period: Period, list: &str, id: &str) -> Result<bool> {
+        self.ensure_writable()?;
+        let mut file = self.open_state(period)?;
+        if !file.state.remove(list, id) {
+            return Ok(false);
+        }
+        file.save()?;
+        Ok(true)
+    }
+
+    /// Creates a task straight from Today or This Week.
+    ///
+    /// The task is written to the Inbox — Day and Week never store content of
+    /// their own, they only point at tasks that live in a real list (spec 3).
+    pub fn add_task_in_period(&self, period: Period, text: impl Into<String>) -> Result<String> {
+        self.ensure_writable()?;
+        let mut inbox = self.inbox()?;
+        let id = inbox.add_text(text);
+        inbox.save()?;
+
+        let mut file = self.open_state(period)?;
+        file.state.add(INBOX_LIST, &id);
+        file.save()?;
+        Ok(id)
+    }
+
+    // ------------------------------------------------------- complete / undo
+
+    /// Completes a task: it moves to `Completas.md` with its origin recorded,
+    /// and stops being pulled into Today and This Week.
+    pub fn complete_task(&self, list: &str, id: &str) -> Result<Task> {
+        self.ensure_writable()?;
+        let task = self.transfer(id, list, COMPLETED_LIST, OriginAction::Record, Some(true))?;
+
+        // The task left the list, so any reference to it is now dangling.
+        for period in [Period::Day, Period::Week] {
+            let mut state = self.open_state(period)?;
+            if state.state.remove(list, id) {
+                state.save()?;
+            }
+        }
+        Ok(task)
+    }
+
+    /// Un-completes a task, sending it back to the list it came from.
+    ///
+    /// The origin list is recreated when it no longer exists. A task with no
+    /// usable origin — hand-written into `Completas.md`, or pointing at a name
+    /// that is no longer valid — lands in the Inbox rather than nowhere.
+    pub fn uncomplete_task(&self, id: &str) -> Result<Task> {
+        self.ensure_writable()?;
+        let completed = self.completed()?;
+        let task = completed
+            .find(id)
+            .ok_or_else(|| Error::TaskNotFound(id.to_string()))?;
+
+        let target = match task.origin.as_deref() {
+            Some(origin) if self.list_path(origin).is_ok() => origin.to_string(),
+            _ => INBOX_LIST.to_string(),
+        };
+
+        self.transfer(
+            id,
+            COMPLETED_LIST,
+            &target,
+            OriginAction::Clear,
+            Some(false),
+        )
     }
 }

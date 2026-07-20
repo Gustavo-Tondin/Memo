@@ -146,6 +146,24 @@ impl TaskList {
         }
     }
 
+    /// Repoints the `origin` of every task that came from `from` to `to`.
+    /// Returns how many changed, so the caller can skip a pointless write.
+    ///
+    /// Used when a list is renamed: without this, undoing a completed task
+    /// would try to send it back to a list that no longer exists.
+    pub fn repoint_origin(&mut self, from: &str, to: &str) -> usize {
+        let mut changed = 0;
+        for line in &mut self.lines {
+            if let Line::Task(task) = line {
+                if task.origin.as_deref() == Some(from) {
+                    task.origin = Some(to.to_string());
+                    changed += 1;
+                }
+            }
+        }
+        changed
+    }
+
     /// Gives an id to every task typed by hand outside the app. Returns how
     /// many were adopted, so the caller can skip saving when nothing changed.
     pub fn ensure_ids(&mut self) -> usize {

@@ -21,6 +21,20 @@ pub enum Error {
 
     #[error("invalid list name {0:?}")]
     InvalidListName(String),
+
+    /// The notebook was written by a newer version of the app. Opening it
+    /// read-only is safer than rewriting a file whose fields we do not know.
+    #[error("notebook uses schema version {found}, this build supports {supported}")]
+    ReadOnlyNotebook { found: u64, supported: u64 },
+
+    /// `Inbox` and `Completas` are recreated on every open, so renaming or
+    /// deleting them would only confuse the user.
+    #[error("{0} is a default list and cannot be renamed or deleted")]
+    ProtectedList(String),
+
+    /// The file watcher could not be started or kept running.
+    #[error("could not watch the notebook: {0}")]
+    Watch(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

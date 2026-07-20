@@ -6,15 +6,24 @@
 //!
 //! Reading and writing the notebook is done. Day/week rules come next.
 
+pub mod clock;
+pub mod config;
 pub mod error;
 pub mod id;
 pub mod list;
 pub mod notebook;
+pub mod rollover;
+pub mod state;
 pub mod task;
+pub mod watcher;
 
+pub use clock::{TurnOffset, WeekStart};
+pub use config::{Config, Rollover, RolloverMode};
 pub use error::{Error, Result};
 pub use list::{Line, TaskList};
 pub use notebook::{Notebook, OriginAction};
+pub use state::{Period, PeriodState, StateFile, TaskRef};
+pub use watcher::{Change, NotebookWatcher};
 pub use task::Task;
 
 /// Name of the hidden config directory inside a notebook (the "caderno").
