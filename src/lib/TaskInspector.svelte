@@ -2,44 +2,134 @@
   // The right-hand panel: everything about one task that the row is too small
   // to show. The row keeps quiet markers; this is where the fields are edited.
   //
-  // Two rules shape this file:
+  // Three rules shape this file:
   //
   // 1. Opening a task never writes. A task with no id only gets one when the
-  //    first save happens, so clicking around to look at things leaves the
-  //    `.md` byte for byte as it was.
-  // 2. The task is saved whole, in one call. `set_task_fields` exists for
+  //    user actually changes something, so clicking around to look at things
+  //    leaves the `.md` byte for byte as it was.
+  // 2. There is no save button. An edit that the user has to remember to
+  //    confirm is an edit they will lose. Changes are written on their own,
+  //    shortly after the typing stops.
+  // 3. The task is saved whole, in one call. `set_task_fields` exists for
   //    exactly this, because a half-applied edit is worse than none.
+  import { onDestroy } from "svelte";
   import { api } from "./api.js";
   import { ensureTaskId } from "./taskId.js";
 
-  let { task, list, readOnly = false, onSaved, onError, onClose } = $props();
+  let {
+    task,
+    list,
+    readOnly = false,
+    onSaved,
+    onError,
+    onClose,
+    // How long to wait after the last keystroke. A prop so tests can drop it
+    // to zero instead of sleeping — a real user never sets this.
+    saveDelay = 500,
+  } = $props();
 
   let draft = $state(fromTask(null));
-  let saving = $state(false);
   let newTag = $state("");
   let newSubtask = $state("");
-  /// The id this task is known by, once it has one.
-  ///
-  /// Needed because the screen above still holds the copy it selected, which
-  /// has no id yet. Without remembering it here, saving a second time would
-  /// look for an id-less task that no longer exists and fail.
-  let knownId = $state(null);
+
+  // Plain variables, not state: none of this should re-render anything, and a
+  // reactive `pending` would make the auto-save effect trigger itself.
+  //
+  // `slot` is the task the current draft belongs to, together with its id once
+  // it has one. It is captured instead of read from the props at write time,
+  // because the user can click another task while a write is still on its way
+  // — and that write has to land on the task it was typed into.
+  let slot = null;
+  let baseline = "";
+  let pending = null;
+  let timer = null;
 
   // A different task selected means a different draft. Without this, editing
   // one task and clicking another would show the first one's typing.
   $effect(() => {
     task;
     list;
-    draft = fromTask(task);
-    knownId = task?.id ?? null;
+    // Whatever was typed into the previous task goes out now, addressed to
+    // that task, before the draft is replaced.
+    flush();
+    slot = { list, task, id: task?.id ?? null };
+    // Stringify the plain object before it becomes the reactive draft.
+    // Reading `draft` here would make this effect depend on the state it
+    // assigns, and Svelte would loop until it gave up.
+    const fresh = fromTask(task);
+    baseline = JSON.stringify(fresh);
+    draft = fresh;
     newTag = "";
     newSubtask = "";
   });
 
-  /// The id of the task being edited, assigning one on first need.
-  async function taskId() {
-    if (!knownId) knownId = await ensureTaskId(list, task);
-    return knownId;
+  // The auto-save itself. Stringifying the draft subscribes to every field in
+  // it; comparing against the baseline is what tells a real edit apart from
+  // the effect above having just reloaded the same values.
+  $effect(() => {
+    const snapshot = JSON.stringify(draft);
+    if (readOnly || snapshot === baseline) return;
+
+    // The snapshot rides along with the fields it produced, so that marking
+    // the write as done later cannot swallow something typed in between.
+    pending = { fields: fields(), snapshot };
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(write, saveDelay);
+  });
+
+  // A pending edit must not die with the panel — closing it is the most
+  // natural moment to stop typing.
+  onDestroy(() => flush());
+
+  /// Sends whatever is waiting right now, without waiting for the timer.
+  function flush() {
+    if (!pending) return Promise.resolve();
+    if (timer) clearTimeout(timer);
+    timer = null;
+    return write();
+  }
+
+  async function write() {
+    // Read synchronously: by the time the first await returns, the user may
+    // already have selected another task and replaced both of these.
+    const target = slot;
+    const job = pending;
+    pending = null;
+    timer = null;
+    if (!target || !job) return;
+
+    try {
+      // The id is earned here, on a real change — never on opening the task.
+      if (!target.id) target.id = await ensureTaskId(target.list, target.task);
+      await api.setTaskFields(target.list, target.id, job.fields);
+      // Only after it lands, and only if the panel is still on the same task:
+      // a failed write has to be retried by the next edit, not quietly
+      // counted as saved.
+      if (target === slot) baseline = job.snapshot;
+      onSaved?.();
+    } catch (e) {
+      onError?.(e);
+    }
+  }
+
+  function fields() {
+    return {
+      // An emptied name would leave a checkbox with no text; keep the old one.
+      text: draft.text.trim() || slot?.task?.text || "",
+      // Present-but-null is how a field is cleared — absent would mean
+      // "leave alone", and there would be no way to remove a date.
+      due: draft.due || null,
+      priority: Number(draft.priority) || null,
+      tags: draft.tags,
+      // Blank lines are dropped: an empty indented line ends the task block
+      // in the file, which would cut the description in half on re-read.
+      description: draft.description
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean),
+      repeat: repeatText(),
+      subtasks: draft.subtasks.map((s) => ({ text: s.text, done: s.done })),
+    };
   }
 
   function fromTask(t) {
@@ -90,48 +180,23 @@
   const removeSubtask = (i) =>
     (draft.subtasks = draft.subtasks.filter((_, at) => at !== i));
 
-  async function act(fn) {
-    if (readOnly || saving) return;
-    saving = true;
+  async function complete() {
+    if (readOnly) return;
+    // Any typing goes out first, and is waited for: completing moves the task
+    // to another file, and two writes racing would both try to hand out the
+    // id — the loser failing on a task that no longer has one to claim.
+    await flush();
+    const target = slot;
     try {
-      await fn();
+      if (!target.id) target.id = await ensureTaskId(target.list, target.task);
+      await api.completeTask(target.list, target.id);
       onSaved?.();
-    } catch (e) {
-      onError?.(e);
-    } finally {
-      saving = false;
-    }
-  }
-
-  const save = () =>
-    act(async () => {
-      const id = await taskId();
-      await api.setTaskFields(list, id, {
-        // An emptied name would leave a checkbox with no text; keep the old one.
-        text: draft.text.trim() || task.text,
-        // Present-but-null is how a field is cleared — absent would mean
-        // "leave alone", and there would be no way to remove a date.
-        due: draft.due || null,
-        priority: Number(draft.priority) || null,
-        tags: draft.tags,
-        // Blank lines are dropped: an empty indented line ends the task block
-        // in the file, which would cut the description in half on re-read.
-        description: draft.description
-          .split("\n")
-          .map((line) => line.trim())
-          .filter(Boolean),
-        repeat: repeatText(),
-        subtasks: draft.subtasks.map((s) => ({ text: s.text, done: s.done })),
-      });
-    });
-
-  const complete = () =>
-    act(async () => {
-      const id = await taskId();
-      await api.completeTask(list, id);
       // The task just left this list, so the panel is pointing at nothing.
       onClose?.();
-    });
+    } catch (e) {
+      onError?.(e);
+    }
+  }
 </script>
 
 <aside>
@@ -139,7 +204,7 @@
     <input
       type="checkbox"
       checked={task?.done ?? false}
-      disabled={readOnly || saving}
+      disabled={readOnly}
       onchange={complete}
       aria-label="concluir"
     />
@@ -242,14 +307,6 @@
     </label>
   </section>
 
-  {#if !readOnly}
-    <footer>
-      <button class="primary" onclick={save} disabled={saving}>Salvar</button>
-      <button onclick={() => (draft = fromTask(task))} disabled={saving}>
-        Descartar
-      </button>
-    </footer>
-  {/if}
 </aside>
 
 <style>
@@ -343,15 +400,6 @@
   }
   .repeat input {
     width: 3.5rem;
-  }
-  footer {
-    display: flex;
-    gap: 0.5rem;
-    margin-top: auto;
-    padding-top: 0.5rem;
-  }
-  .primary {
-    font-weight: 600;
   }
   form input {
     width: 100%;

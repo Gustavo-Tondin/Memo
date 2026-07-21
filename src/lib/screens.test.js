@@ -346,33 +346,61 @@ describe("CompletedView", () => {
   });
 });
 
+
 describe("TaskInspector", () => {
+  // saveDelay 0 so the debounce resolves on the next tick instead of the test
+  // sitting through half a second of nothing.
   const props = (task, extra = {}) => ({
     task,
     list: "Compras",
     readOnly: false,
+    saveDelay: 0,
     onSaved: noop,
     onError: noop,
     onClose: noop,
     ...extra,
   });
 
-  /// The arguments of the single `set_task_fields` call.
-  const savedFields = () =>
-    invoke.mock.calls.find(([cmd]) => cmd === "set_task_fields")[1].fields;
+  /// The fields of the last `set_task_fields` call.
+  const lastSave = () =>
+    invoke.mock.calls.filter(([cmd]) => cmd === "set_task_fields").at(-1)[1];
 
-  test("opening a task without an id does not write anything", async () => {
-    // The whole point of the lazy id: looking at a task must leave the `.md`
-    // untouched. Assigning on open would make every click a file write.
+  const saveCount = () =>
+    invoke.mock.calls.filter(([cmd]) => cmd === "set_task_fields").length;
+
+  test("opening a task writes nothing at all", async () => {
+    // The whole point of the lazy id, and now of the auto-save too: looking at
+    // a task must leave the `.md` untouched. Saving on open would give every
+    // hand-written task an id just for having been clicked.
     bridge({ ensure_task_id: "new1", set_task_fields: null });
 
     render(TaskInspector, { props: props(task(null, "Escrita à mão")) });
 
     await screen.findByDisplayValue("Escrita à mão");
+    await new Promise((r) => setTimeout(r, 20));
     expect(invoke).not.toHaveBeenCalled();
   });
 
-  test("saving a task without an id gives it one first", async () => {
+  test("there is no save button to forget", async () => {
+    bridge({ set_task_fields: null });
+
+    render(TaskInspector, { props: props(task("a1", "Comprar leite")) });
+
+    await screen.findByDisplayValue("Comprar leite");
+    expect(screen.queryByText("Salvar")).toBeNull();
+  });
+
+  test("editing saves on its own", async () => {
+    bridge({ set_task_fields: null });
+
+    render(TaskInspector, { props: props(task("a1", "Comprar leite")) });
+    await userEvent.type(await screen.findByPlaceholderText("Nova tag…"), "casa{enter}");
+
+    await waitFor(() => expect(lastSave().fields.tags).toEqual(["casa"]));
+    expect(lastSave().id).toBe("a1");
+  });
+
+  test("the first edit is what earns the id", async () => {
     bridge({
       list_tasks: [task(null, "Escrita à mão")],
       ensure_task_id: "new1",
@@ -380,7 +408,7 @@ describe("TaskInspector", () => {
     });
 
     render(TaskInspector, { props: props(task(null, "Escrita à mão")) });
-    await userEvent.click(await screen.findByText("Salvar"));
+    await userEvent.type(await screen.findByPlaceholderText("Nova tag…"), "casa{enter}");
 
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("ensure_task_id", {
@@ -388,14 +416,13 @@ describe("TaskInspector", () => {
         position: 0,
       }),
     );
-    const call = invoke.mock.calls.find(([cmd]) => cmd === "set_task_fields");
-    expect(call[1].id).toBe("new1");
+    expect(lastSave().id).toBe("new1");
   });
 
-  test("saving twice does not ask for a second id", async () => {
+  test("a second edit does not ask for a second id", async () => {
     // The screen above still holds the id-less copy it selected. Looking the
     // position up again would find nothing — the task has an id by now — and
-    // the second save would fail with taskNotFound.
+    // the second write would fail with taskNotFound.
     bridge({
       list_tasks: [task(null, "Escrita à mão")],
       ensure_task_id: "new1",
@@ -403,30 +430,14 @@ describe("TaskInspector", () => {
     });
 
     render(TaskInspector, { props: props(task(null, "Escrita à mão")) });
+    const tags = await screen.findByPlaceholderText("Nova tag…");
 
-    const save = await screen.findByText("Salvar");
-    await userEvent.click(save);
-    await waitFor(() =>
-      expect(invoke.mock.calls.some(([cmd]) => cmd === "set_task_fields")).toBe(true),
-    );
-    await userEvent.click(save);
+    await userEvent.type(tags, "casa{enter}");
+    await waitFor(() => expect(saveCount()).toBe(1));
+    await userEvent.type(tags, "obra{enter}");
+    await waitFor(() => expect(saveCount()).toBe(2));
 
-    await waitFor(() =>
-      expect(invoke.mock.calls.filter(([cmd]) => cmd === "set_task_fields").length).toBe(2),
-    );
     expect(invoke.mock.calls.filter(([cmd]) => cmd === "ensure_task_id").length).toBe(1);
-  });
-
-  test("an existing id is used as is", async () => {
-    bridge({ set_task_fields: null });
-
-    render(TaskInspector, { props: props(task("a1", "Comprar leite")) });
-    await userEvent.click(await screen.findByText("Salvar"));
-
-    await waitFor(() =>
-      expect(invoke.mock.calls.some(([cmd]) => cmd === "set_task_fields")).toBe(true),
-    );
-    expect(invoke.mock.calls.some(([cmd]) => cmd === "ensure_task_id")).toBe(false);
   });
 
   test("clearing the date sends null, not nothing", async () => {
@@ -439,9 +450,8 @@ describe("TaskInspector", () => {
     });
 
     await userEvent.clear(await screen.findByLabelText("Data"));
-    await userEvent.click(screen.getByText("Salvar"));
 
-    await waitFor(() => expect(savedFields().due).toBe(null));
+    await waitFor(() => expect(lastSave().fields.due).toBe(null));
   });
 
   test("a tag with spaces is stored as a single token", async () => {
@@ -451,11 +461,12 @@ describe("TaskInspector", () => {
     bridge({ set_task_fields: null });
 
     render(TaskInspector, { props: props(task("a1", "Comprar leite")) });
+    await userEvent.type(
+      await screen.findByPlaceholderText("Nova tag…"),
+      "casa nova{enter}",
+    );
 
-    await userEvent.type(await screen.findByPlaceholderText("Nova tag…"), "casa nova{enter}");
-    await userEvent.click(screen.getByText("Salvar"));
-
-    await waitFor(() => expect(savedFields().tags).toEqual(["casa-nova"]));
+    await waitFor(() => expect(lastSave().fields.tags).toEqual(["casa-nova"]));
   });
 
   test("repeat travels in the written form, never as an object", async () => {
@@ -463,24 +474,26 @@ describe("TaskInspector", () => {
     bridge({ set_task_fields: null });
 
     render(TaskInspector, {
-      props: props(task("a1", "Regar plantas", { repeat: { every: 2, unit: "week" } })),
+      props: props(
+        task("a1", "Regar plantas", { repeat: { every: 2, unit: "week" } }),
+      ),
     });
+    await userEvent.type(await screen.findByPlaceholderText("Nova tag…"), "casa{enter}");
 
-    await userEvent.click(await screen.findByText("Salvar"));
-
-    await waitFor(() => expect(savedFields().repeat).toBe("every-2-weeks"));
+    await waitFor(() => expect(lastSave().fields.repeat).toBe("every-2-weeks"));
   });
 
   test("a single repetition drops the count", async () => {
     bridge({ set_task_fields: null });
 
     render(TaskInspector, {
-      props: props(task("a1", "Regar plantas", { repeat: { every: 1, unit: "day" } })),
+      props: props(
+        task("a1", "Regar plantas", { repeat: { every: 1, unit: "day" } }),
+      ),
     });
+    await userEvent.type(await screen.findByPlaceholderText("Nova tag…"), "casa{enter}");
 
-    await userEvent.click(await screen.findByText("Salvar"));
-
-    await waitFor(() => expect(savedFields().repeat).toBe("every-day"));
+    await waitFor(() => expect(lastSave().fields.repeat).toBe("every-day"));
   });
 
   test("subtasks survive the round trip", async () => {
@@ -491,31 +504,17 @@ describe("TaskInspector", () => {
         task("a1", "Obra", { subtasks: [{ text: "Cimento", done: true }] }),
       ),
     });
-
     await userEvent.type(
       await screen.findByPlaceholderText("Nova subtarefa…"),
       "Areia{enter}",
     );
-    await userEvent.click(screen.getByText("Salvar"));
 
     await waitFor(() =>
-      expect(savedFields().subtasks).toEqual([
+      expect(lastSave().fields.subtasks).toEqual([
         { text: "Cimento", done: true },
         { text: "Areia", done: false },
       ]),
     );
-  });
-
-  test("a read-only notebook offers no way to save", async () => {
-    bridge({});
-
-    render(TaskInspector, {
-      props: props(task("a1", "Comprar leite"), { readOnly: true }),
-    });
-
-    await screen.findByDisplayValue("Comprar leite");
-    expect(screen.queryByText("Salvar")).toBeNull();
-    expect(screen.queryByPlaceholderText("Nova tag…")).toBeNull();
   });
 
   test("selecting another task replaces the draft", async () => {
@@ -530,5 +529,76 @@ describe("TaskInspector", () => {
 
     expect(await screen.findByDisplayValue("Pagar boleto")).toBeTruthy();
     expect(screen.queryByDisplayValue("Comprar leite")).toBeNull();
+  });
+
+  test("switching task mid-edit still saves what was typed, to the right task", async () => {
+    // The dangerous moment of an auto-save: a pending write belongs to the
+    // task it was typed into, not to whatever is on screen when it lands.
+    bridge({ set_task_fields: null });
+
+    const { rerender } = render(TaskInspector, {
+      props: props(task("a1", "Comprar leite"), { saveDelay: 10_000 }),
+    });
+    await userEvent.type(await screen.findByPlaceholderText("Nova tag…"), "casa{enter}");
+
+    await rerender(props(task("b2", "Pagar boleto"), { saveDelay: 10_000 }));
+
+    await waitFor(() => expect(saveCount()).toBe(1));
+    expect(lastSave().id).toBe("a1");
+    expect(lastSave().fields.tags).toEqual(["casa"]);
+  });
+
+  test("closing with an edit pending still saves it", async () => {
+    bridge({ set_task_fields: null });
+
+    const { unmount } = render(TaskInspector, {
+      props: props(task("a1", "Comprar leite"), { saveDelay: 10_000 }),
+    });
+    await userEvent.type(await screen.findByPlaceholderText("Nova tag…"), "casa{enter}");
+
+    unmount();
+
+    await waitFor(() => expect(saveCount()).toBe(1));
+    expect(lastSave().fields.tags).toEqual(["casa"]);
+  });
+
+  test("a failed write is retried by the next edit, not counted as saved", async () => {
+    let attempts = 0;
+    const errors = [];
+    bridge({
+      set_task_fields: () => {
+        attempts += 1;
+        return attempts === 1
+          ? Promise.reject({ kind: "io", message: "disco cheio" })
+          : Promise.resolve(null);
+      },
+    });
+
+    render(TaskInspector, {
+      props: props(task("a1", "Comprar leite"), {
+        onError: (e) => errors.push(e),
+      }),
+    });
+    const tags = await screen.findByPlaceholderText("Nova tag…");
+
+    await userEvent.type(tags, "casa{enter}");
+    await waitFor(() => expect(errors.length).toBe(1));
+
+    await userEvent.type(tags, "obra{enter}");
+    // The retry carries the tag the failed write was meant to persist.
+    await waitFor(() => expect(lastSave().fields.tags).toEqual(["casa", "obra"]));
+  });
+
+  test("a read-only notebook cannot be edited at all", async () => {
+    bridge({ set_task_fields: null });
+
+    render(TaskInspector, {
+      props: props(task("a1", "Comprar leite"), { readOnly: true }),
+    });
+
+    await screen.findByDisplayValue("Comprar leite");
+    expect(screen.queryByPlaceholderText("Nova tag…")).toBeNull();
+    expect(screen.getByLabelText("nome da tarefa").disabled).toBe(true);
+    expect(saveCount()).toBe(0);
   });
 });

@@ -23,6 +23,15 @@
 
   const select = (list, task) => (selected = { list, task });
 
+  // Clicking away from the task closes the panel. Selecting a task stops the
+  // click from bubbling (see TaskRow), so this only fires on the space around
+  // the rows — clicking another task swaps the panel instead of closing it.
+  const clickedAway = () => (selected = null);
+
+  function onKeydown(event) {
+    if (event.key === "Escape" && selected) selected = null;
+  }
+
   /// A screen as a string, so the shell can store it without knowing what a
   /// screen is. Same strings go back through `restoreView`.
   function viewToId(v) {
@@ -195,6 +204,8 @@
   })();
 </script>
 
+<svelte:window onkeydown={onKeydown} />
+
 <main>
   {#if !notebook}
     <section class="onboarding">
@@ -250,7 +261,9 @@
         <button class="secondary" onclick={chooseFolder}>trocar caderno…</button>
       </nav>
 
-      <section class="content">
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <section class="content" onclick={clickedAway}>
         {#if error}
           <p class="error">{error} <button onclick={() => (error = null)}>ok</button></p>
         {/if}
