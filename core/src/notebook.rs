@@ -547,7 +547,7 @@ impl Notebook {
         self.ensure_writable()?;
         let (folder, from_name) = self.resolve_list(from)?;
         if Self::is_default_list(&from_name) {
-            return Err(Error::ProtectedList(from_name));
+            return Err(Error::Protected(from_name));
         }
         if Self::is_default_list(to_name) {
             return Err(Error::InvalidListName(to_name.to_string()));
@@ -592,7 +592,7 @@ impl Notebook {
         self.ensure_writable()?;
         let (folder, name) = self.resolve_list(path)?;
         if Self::is_default_list(&name) {
-            return Err(Error::ProtectedList(name));
+            return Err(Error::Protected(name));
         }
 
         let file = folder.list_path(&name)?;

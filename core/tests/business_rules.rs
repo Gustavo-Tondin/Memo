@@ -308,11 +308,11 @@ fn default_lists_cannot_be_renamed_or_deleted() {
     for path in ["Tasks/Inbox.md", "Tasks/Completed.md"] {
         assert!(matches!(
             notebook.rename_list(path, "Outra").unwrap_err(),
-            Error::ProtectedList(_)
+            Error::Protected(_)
         ));
         assert!(matches!(
             notebook.delete_list(path).unwrap_err(),
-            Error::ProtectedList(_)
+            Error::Protected(_)
         ));
     }
 }

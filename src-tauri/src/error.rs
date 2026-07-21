@@ -45,7 +45,7 @@ impl From<memo_core::Error> for CommandError {
             Error::InvalidWidgetFolder(_) => "invalidWidgetFolder",
             Error::InvalidNotePath(_) => "invalidNotePath",
             Error::ReadOnlyNotebook { .. } => "readOnlyNotebook",
-            Error::ProtectedList(_) => "protectedList",
+            Error::Protected(_) => "protected",
             Error::Watch(_) => "watch",
         };
         Self::new(kind, error.to_string())

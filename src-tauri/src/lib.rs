@@ -61,6 +61,8 @@ pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
             commands::move_note,
             commands::set_note_pinned,
             commands::create_note_folder,
+            commands::rename_note_folder,
+            commands::delete_note_folder,
             // day and week
             commands::period_state,
             commands::period_tasks,

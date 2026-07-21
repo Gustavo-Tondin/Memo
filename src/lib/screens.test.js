@@ -1189,3 +1189,107 @@ describe("NoteEditor", () => {
     expect(screen.queryByText("delete")).toBeNull();
   });
 });
+
+describe("NotesWidget folder management", () => {
+  const widget = { kind: "notes", folder: "Notes", invalidFolder: false, options: null };
+
+  const props = (extra = {}) => ({
+    widget,
+    readOnly: false,
+    notesInbox: "Inbox",
+    onChanged: noop,
+    onError: noop,
+    reloadKey: 0,
+    ...extra,
+  });
+
+  const withFolders = (extra = {}) =>
+    bridge({
+      list_notes: [],
+      note_folders: ["Clientes", "Inbox"],
+      rename_note_folder: "Contas",
+      delete_note_folder: 2,
+      ...extra,
+    });
+
+  const openClientes = async () => {
+    await userEvent.click(await screen.findByText("folders"));
+    await userEvent.click(screen.getByRole("button", { name: "Clientes" }));
+  };
+
+  test("folder actions appear only when a folder is open", async () => {
+    withFolders();
+    render(NotesWidget, { props: props() });
+
+    // On the board there is no folder to act on, so no actions are offered.
+    await screen.findByText("grid");
+    expect(screen.queryByText("delete folder")).toBeNull();
+
+    await openClientes();
+    expect(screen.getByText("delete folder")).toBeTruthy();
+    expect(screen.getByText("rename folder")).toBeTruthy();
+  });
+
+  test("renaming a folder goes through the core", async () => {
+    withFolders();
+    vi.spyOn(window, "prompt").mockReturnValue("Contas");
+
+    render(NotesWidget, { props: props() });
+    await openClientes();
+    await userEvent.click(screen.getByText("rename folder"));
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("rename_note_folder", {
+        folder: "Notes",
+        path: "Clientes",
+        name: "Contas",
+      }),
+    );
+    window.prompt.mockRestore();
+  });
+
+  test("deleting a folder is confirmed and reports what moved", async () => {
+    // Nothing is destroyed — the notes move up a level, and the user is told.
+    const messages = [];
+    withFolders();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(NotesWidget, {
+      props: props({ onError: (e) => messages.push(e.message) }),
+    });
+    await openClientes();
+    await userEvent.click(screen.getByText("delete folder"));
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("delete_note_folder", {
+        folder: "Notes",
+        path: "Clientes",
+      }),
+    );
+    expect(window.confirm.mock.calls[0][0]).toContain("nothing is deleted");
+    await waitFor(() =>
+      expect(messages.some((m) => m.includes("moved up one level"))).toBe(true),
+    );
+    window.confirm.mockRestore();
+  });
+
+  test("a refused confirmation deletes nothing", async () => {
+    withFolders();
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    render(NotesWidget, { props: props() });
+    await openClientes();
+    await userEvent.click(screen.getByText("delete folder"));
+
+    expect(invoke.mock.calls.some(([cmd]) => cmd === "delete_note_folder")).toBe(false);
+    window.confirm.mockRestore();
+  });
+
+  test("a read-only notebook offers no folder actions", async () => {
+    withFolders();
+    render(NotesWidget, { props: props({ readOnly: true }) });
+
+    await openClientes();
+    expect(screen.queryByText("delete folder")).toBeNull();
+  });
+});

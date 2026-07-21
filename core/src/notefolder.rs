@@ -175,14 +175,12 @@ impl NoteFolder {
         let dir = self.folder_path(folder)?;
         std::fs::create_dir_all(&dir).ctx(&dir)?;
 
-        let mut name = title.clone();
-        let mut attempt = 2;
-        while dir.join(format!("{name}.{EXTENSION}")).exists() {
-            name = format!("{title} {attempt}");
-            attempt += 1;
-        }
-
-        let relative = join_relative(folder, &format!("{name}.{EXTENSION}"));
+        let file = free_path(&dir, &format!("{title}.{EXTENSION}"));
+        let name = file
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let relative = join_relative(folder, &name);
         let mut note = Note::default();
         note.adopt_created(today);
         crate::fsio::write_atomically(&self.note_path(&relative)?, note.render().as_bytes())?;
@@ -247,6 +245,74 @@ impl NoteFolder {
         Ok(())
     }
 
+    /// Renames a folder in place, keeping its parent. Returns the new
+    /// address.
+    pub fn rename_folder(&self, relative: &str, name: &str) -> Result<String> {
+        self.refuse_if_protected(relative)?;
+        let name = sanitize_title(name)?;
+        let source = self.folder_path(relative)?;
+        if !source.is_dir() {
+            return Err(Error::InvalidNotePath(relative.to_string()));
+        }
+
+        let (parent, _) = split_folder(relative);
+        let target_relative = join_relative(&parent, &name);
+        let target = self.folder_path(&target_relative)?;
+        if target == source {
+            return Ok(target_relative);
+        }
+        if target.exists() {
+            return Err(Error::InvalidNotePath(format!("{name} already exists")));
+        }
+        std::fs::rename(&source, &target).ctx(&target)?;
+        Ok(target_relative)
+    }
+
+    /// Deletes a folder, **moving what was inside up to its parent**.
+    ///
+    /// Deleting a folder is a filing decision, not a decision to throw notes
+    /// away — the same rule `delete_list` follows on the tasks side
+    /// (principle 2: the data is the user's). Subfolders move up whole, so
+    /// the structure below survives too. Returns how many entries moved.
+    pub fn delete_folder(&self, relative: &str) -> Result<usize> {
+        self.refuse_if_protected(relative)?;
+        let dir = self.folder_path(relative)?;
+        if !dir.is_dir() || relative.is_empty() {
+            return Err(Error::InvalidNotePath(relative.to_string()));
+        }
+
+        let (parent, _) = split_folder(relative);
+        let parent_dir = self.folder_path(&parent)?;
+        let mut moved = 0;
+
+        let entries = std::fs::read_dir(&dir).ctx(&dir)?;
+        for entry in entries {
+            let path = entry.ctx(&dir)?.path();
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let target = free_path(&parent_dir, &name);
+            std::fs::rename(&path, &target).ctx(&target)?;
+            moved += 1;
+        }
+
+        // Only the now-empty folder goes away. `remove_dir`, not
+        // `remove_dir_all`: if anything is still in there, something went
+        // wrong above and erasing it would be the worst possible recovery.
+        std::fs::remove_dir(&dir).ctx(&dir)?;
+        Ok(moved)
+    }
+
+    /// The widget's `Inbox` is recreated on every open, so renaming or
+    /// deleting it would only confuse the user.
+    fn refuse_if_protected(&self, relative: &str) -> Result<()> {
+        if relative == NOTES_INBOX {
+            return Err(Error::Protected(relative.to_string()));
+        }
+        Ok(())
+    }
+
     /// Walks the subtree, skipping hidden entries and sync conflicts.
     fn walk(
         &self,
@@ -302,6 +368,36 @@ fn split_relative(relative: &str) -> (String, String) {
         Some((folder, title)) => (folder.to_string(), title.to_string()),
         None => (String::new(), stem.to_string()),
     }
+}
+
+/// Splits a folder address into parent and name: `Clientes/Riwer` →
+/// (`Clientes`, `Riwer`).
+fn split_folder(relative: &str) -> (String, String) {
+    match relative.rsplit_once('/') {
+        Some((parent, name)) => (parent.to_string(), name.to_string()),
+        None => (String::new(), relative.to_string()),
+    }
+}
+
+/// A path in `dir` for `name`, suffixed until it is free. Moving something
+/// onto an existing name would destroy it silently.
+fn free_path(dir: &Path, name: &str) -> PathBuf {
+    let candidate = dir.join(name);
+    if !candidate.exists() {
+        return candidate;
+    }
+
+    let (stem, extension) = match name.rsplit_once('.') {
+        Some((stem, ext)) => (stem.to_string(), format!(".{ext}")),
+        None => (name.to_string(), String::new()),
+    };
+    for attempt in 2.. {
+        let candidate = dir.join(format!("{stem} {attempt}{extension}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    unreachable!("the loop returns as soon as a name is free")
 }
 
 fn join_relative(folder: &str, name: &str) -> String {

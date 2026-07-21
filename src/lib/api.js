@@ -58,6 +58,10 @@ export const api = {
   setNotePinned: (folder, path, pinned) =>
     invoke("set_note_pinned", { folder, path, pinned }),
   createNoteFolder: (folder, path) => invoke("create_note_folder", { folder, path }),
+  renameNoteFolder: (folder, path, name) =>
+    invoke("rename_note_folder", { folder, path, name }),
+  // Returns how many entries moved up to the parent — nothing is destroyed.
+  deleteNoteFolder: (folder, path) => invoke("delete_note_folder", { folder, path }),
 
   // day and week
   periodTasks: (period) => invoke("period_tasks", { period }),

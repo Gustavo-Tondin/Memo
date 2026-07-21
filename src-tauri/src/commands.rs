@@ -647,6 +647,28 @@ pub fn set_note_pinned(
     state.with_notebook(|nb| Ok(nb.note_folder(&folder)?.set_pinned(&path, pinned)?))
 }
 
+/// Renames a folder inside a notes widget. Returns the new address.
+#[tauri::command]
+pub fn rename_note_folder(
+    state: State<'_, AppState>,
+    folder: String,
+    path: String,
+    name: String,
+) -> CommandResult<String> {
+    state.with_notebook(|nb| Ok(nb.note_folder(&folder)?.rename_folder(&path, &name)?))
+}
+
+/// Deletes a folder, moving what was inside up to its parent. Returns how
+/// many entries moved — the UI tells the user, the way deleting a list does.
+#[tauri::command]
+pub fn delete_note_folder(
+    state: State<'_, AppState>,
+    folder: String,
+    path: String,
+) -> CommandResult<usize> {
+    state.with_notebook(|nb| Ok(nb.note_folder(&folder)?.delete_folder(&path)?))
+}
+
 #[tauri::command]
 pub fn create_note_folder(
     state: State<'_, AppState>,

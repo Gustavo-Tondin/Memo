@@ -51,6 +51,13 @@ export const S = {
   promptRenameNote: (title) => `New title for "${title}":`,
   promptNewNoteFolder: "Name of the new folder:",
   newNoteFolder: "+ new folder",
+  renameFolder: "rename folder",
+  deleteFolder: "delete folder",
+  promptRenameFolder: (name) => `New name for "${name}":`,
+  confirmDeleteFolder: (name) =>
+    `Delete the folder "${name}"? Its notes and subfolders move up one level — nothing is deleted.`,
+  folderEmptied: (count, name) =>
+    `${count} item(s) from "${name}" moved up one level.`,
   confirmDeleteNote: (title) => `Delete "${title}"? This cannot be undone.`,
   searchNotes: "Search notes…",
   noNotes: "No notes yet.",

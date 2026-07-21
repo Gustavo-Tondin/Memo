@@ -50,10 +50,11 @@ pub enum Error {
     #[error("notebook uses schema version {found}, this build supports {supported}")]
     ReadOnlyNotebook { found: u64, supported: u64 },
 
-    /// `Inbox` and `Completas` are recreated on every open, so renaming or
-    /// deleting them would only confuse the user.
-    #[error("{0} is a default list and cannot be renamed or deleted")]
-    ProtectedList(String),
+    /// A default the app recreates on every open — `Inbox`, `Completed`, the
+    /// notes `Inbox` folder. Renaming or deleting one would only confuse the
+    /// user, since it comes straight back.
+    #[error("{0} is created by the app and cannot be renamed or deleted")]
+    Protected(String),
 
     /// The file watcher could not be started or kept running.
     #[error("could not watch the notebook: {0}")]

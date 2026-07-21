@@ -86,6 +86,25 @@
   const togglePin = (entry) =>
     act(() => api.setNotePinned(folder, entry.path, !entry.pinned));
 
+  const renameFolder = () =>
+    act(async () => {
+      if (!openFolder) return;
+      const current = openFolder.split("/").pop();
+      const next = prompt(S.promptRenameFolder(current), current);
+      if (!next || next.trim() === current) return;
+      openFolder = await api.renameNoteFolder(folder, openFolder, next.trim());
+    });
+
+  const deleteFolder = () =>
+    act(async () => {
+      if (!openFolder) return;
+      const name = openFolder.split("/").pop();
+      if (!confirm(S.confirmDeleteFolder(name))) return;
+      const moved = await api.deleteNoteFolder(folder, openFolder);
+      openFolder = null;
+      if (moved > 0) onError?.({ kind: "info", message: S.folderEmptied(moved, name) });
+    });
+
   // In the tree view, only the notes of the folder being looked at.
   let shown = $derived(
     layout === "tree" && openFolder !== null
@@ -139,6 +158,16 @@
         >
       {/each}
     </nav>
+
+    <!-- Folder actions live next to the folder they act on, and only when
+         one is open — a folder is not deletable from the board view, where
+         nothing says which one you mean. -->
+    {#if !readOnly && openFolder}
+      <p class="folder-actions">
+        <button onclick={renameFolder}>{S.renameFolder}</button>
+        <button onclick={deleteFolder}>{S.deleteFolder}</button>
+      </p>
+    {/if}
   {/if}
 
   {#if shown.length === 0}
@@ -200,6 +229,21 @@
   .folders button.active {
     background: #eef2ff;
     border-color: #b9c6f5;
+  }
+  .folder-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin: -0.4rem 0 0.75rem;
+    font-size: 0.85rem;
+  }
+  .folder-actions button {
+    background: none;
+    border: none;
+    color: #666;
+    font: inherit;
+    cursor: pointer;
+    padding: 0;
+    text-decoration: underline;
   }
   /* The grid is a masonry-ish board of cards; the tree view is one column,
      since it is already filtered to a folder. */

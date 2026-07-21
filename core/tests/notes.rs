@@ -237,3 +237,73 @@ fn a_checklist_in_a_note_stays_a_note() {
     assert!(on_disk.ends_with("- [ ] leite\n- [x] pão\n"));
     assert!(!on_disk.contains("<!--id"));
 }
+
+#[test]
+fn deleting_a_folder_moves_what_was_inside_up_instead_of_destroying_it() {
+    // The tasks side rescues a deleted list's tasks into the Inbox; the notes
+    // side moves a deleted folder's contents up to the parent. Same rule,
+    // same reason: filing is not throwing away (principle 2).
+    let (dir, notes) = folder();
+    notes.create_folder("Clientes/Riwer").unwrap();
+    let note = notes.create("Clientes", "contrato", today()).unwrap();
+    notes.write(&note, "Assinado.\n", today()).unwrap();
+    std::fs::write(
+        dir.path().join("Notes/Clientes/Riwer/briefing.md"),
+        "Marca.\n",
+    )
+    .unwrap();
+
+    let moved = notes.delete_folder("Clientes").unwrap();
+    assert_eq!(moved, 2, "the note and the subfolder both moved up");
+
+    // The note is at the root now, with its content intact...
+    assert!(notes.read("contrato.md").unwrap().body.contains("Assinado"));
+    // ...and the subfolder moved up whole, keeping what was under it.
+    assert!(notes.read("Riwer/briefing.md").unwrap().body.contains("Marca"));
+    assert!(!dir.path().join("Notes/Clientes").exists());
+}
+
+#[test]
+fn moving_up_never_overwrites_a_name_that_is_already_taken() {
+    let (_dir, notes) = folder();
+    let root = notes.create("", "nota", today()).unwrap();
+    notes.write(&root, "A de fora.\n", today()).unwrap();
+    notes.create_folder("Pasta").unwrap();
+    let inner = notes.create("Pasta", "nota", today()).unwrap();
+    notes.write(&inner, "A de dentro.\n", today()).unwrap();
+
+    notes.delete_folder("Pasta").unwrap();
+
+    assert!(notes.read("nota.md").unwrap().body.contains("A de fora"));
+    assert!(notes.read("nota 2.md").unwrap().body.contains("A de dentro"));
+}
+
+#[test]
+fn folders_can_be_renamed_and_the_notes_come_along() {
+    let (_dir, notes) = folder();
+    notes.create_folder("Clientes").unwrap();
+    let note = notes.create("Clientes", "briefing", today()).unwrap();
+    notes.write(&note, "Conteúdo.\n", today()).unwrap();
+
+    let renamed = notes.rename_folder("Clientes", "Contas").unwrap();
+    assert_eq!(renamed, "Contas");
+    assert!(notes.read("Contas/briefing.md").unwrap().body.contains("Conteúdo"));
+
+    // Renaming onto an existing folder is refused rather than merged.
+    notes.create_folder("Outra").unwrap();
+    assert!(notes.rename_folder("Outra", "Contas").is_err());
+}
+
+#[test]
+fn the_notes_inbox_cannot_be_renamed_or_deleted() {
+    // It is recreated on every open, so allowing either would just confuse.
+    let (_dir, notes) = folder();
+    assert!(matches!(
+        notes.delete_folder("Inbox"),
+        Err(memo_core::Error::Protected(_))
+    ));
+    assert!(matches!(
+        notes.rename_folder("Inbox", "Outra"),
+        Err(memo_core::Error::Protected(_))
+    ));
+}

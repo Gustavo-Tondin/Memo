@@ -263,7 +263,7 @@ fn errors_arrive_typed_so_the_ui_can_branch_on_them() {
     assert!(err["message"].as_str().unwrap().contains("nao-existe"));
 
     let err = invoke(&app, "delete_list", json!({ "name": "Tasks/Inbox.md" })).unwrap_err();
-    assert_eq!(err["kind"], "protectedList");
+    assert_eq!(err["kind"], "protected");
 
     let err = invoke(&app, "create_list", json!({ "folder": "Tasks", "name": "../fuga" })).unwrap_err();
     assert_eq!(err["kind"], "invalidListName");
