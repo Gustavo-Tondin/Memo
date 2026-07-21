@@ -548,6 +548,34 @@ pub fn list_notes(
     })
 }
 
+/// The notes created today — what the Home shows. The Home owns no notes of
+/// its own; this is a view of the inbox (spec 5).
+#[tauri::command]
+pub fn notes_created_today(
+    state: State<'_, AppState>,
+    folder: String,
+) -> CommandResult<Vec<memo_core::NoteEntry>> {
+    state.with_notebook(|nb| {
+        let today = nb.today();
+        Ok(nb.note_folder(&folder)?.created_on(today)?)
+    })
+}
+
+/// Writes a note from one blob of text — the Home's quick capture. The first
+/// line becomes the title.
+#[tauri::command]
+pub fn quick_capture_note(
+    state: State<'_, AppState>,
+    folder: String,
+    in_folder: String,
+    text: String,
+) -> CommandResult<String> {
+    state.with_notebook(|nb| {
+        let today = nb.today();
+        Ok(nb.note_folder(&folder)?.quick_capture(&in_folder, &text, today)?)
+    })
+}
+
 /// The folders inside a notes widget, for the tree view.
 #[tauri::command]
 pub fn note_folders(state: State<'_, AppState>, folder: String) -> CommandResult<Vec<String>> {

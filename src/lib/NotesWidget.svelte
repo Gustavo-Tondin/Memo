@@ -6,7 +6,6 @@
   // only ever lists.
   import { api } from "./api.js";
   import { S } from "./strings.js";
-  import NoteEditor from "./NoteEditor.svelte";
 
   let {
     widget,
@@ -14,6 +13,7 @@
     notesInbox = "Inbox",
     onChanged,
     onError,
+    onOpenNote,
     reloadKey = 0,
   } = $props();
 
@@ -23,7 +23,6 @@
   let notes = $state([]);
   let folders = $state([]);
   let query = $state("");
-  let open = $state(null);
   /// `grid` (cards, Keep-like) or `tree` (by folder).
   ///
   /// The config option picks the starting layout and the user's choice wins
@@ -72,7 +71,8 @@
       // A note created from a folder lands in it; from the board, in the
       // inbox — the spec's "loose notes go to Notes/Inbox".
       const target = openFolder ?? notesInbox;
-      open = await api.createNote(folder, target, title.trim());
+      const path = await api.createNote(folder, target, title.trim());
+      onOpenNote?.(path, folder);
     });
 
   const createFolder = () =>
@@ -113,17 +113,9 @@
   );
 </script>
 
-{#if open}
-  <NoteEditor
-    {folder}
-    path={open}
-    {readOnly}
-    onSaved={() => act(async () => {})}
-    onError={(e) => onError?.(e)}
-    onClose={() => (open = null)}
-    onRenamed={(path) => (open = path)}
-  />
-{:else}
+<!-- Opening a note is the shell's business: it becomes a document tab, the
+     same as a list. This screen only ever lists. -->
+<div class="notes-widget">
   <div class="bar">
     <input
       class="search"
@@ -176,7 +168,7 @@
     <ul class="board" class:tree={layout === "tree"}>
       {#each shown as entry (entry.path)}
         <li class:pinned={entry.pinned}>
-          <button class="card" onclick={() => (open = entry.path)}>
+          <button class="card" onclick={() => onOpenNote?.(entry.path, folder)}>
             <strong>{entry.title}</strong>
             <span class="preview">{entry.preview || S.emptyNote}</span>
             <small>
@@ -195,7 +187,7 @@
       {/each}
     </ul>
   {/if}
-{/if}
+</div>
 
 <style>
   .bar {

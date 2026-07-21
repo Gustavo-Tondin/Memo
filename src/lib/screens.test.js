@@ -22,6 +22,7 @@ const { default: App } = await import("../App.svelte");
 const { default: WorkspaceView } = await import("./WorkspaceView.svelte");
 const { default: NotesWidget } = await import("./NotesWidget.svelte");
 const { default: NoteEditor } = await import("./NoteEditor.svelte");
+const { default: HomeView } = await import("./HomeView.svelte");
 
 const task = (id, text, extra = {}) => ({
   id,
@@ -738,6 +739,8 @@ describe("App", () => {
         workspaces: [],
       },
       screen_to_restore: "list:Tasks/Inbox.md",
+      note_folders: ["Inbox"],
+      notes_created_today: [],
       list_tasks: [task("a1", "Comprar leite"), task("b2", "Pagar boleto")],
       period_tasks: [],
       grouped_suggestions: [],
@@ -950,6 +953,8 @@ describe("App with a user workspace", () => {
         ],
       },
       screen_to_restore: null,
+      note_folders: ["Inbox"],
+      notes_created_today: [],
       list_tasks: [],
       period_tasks: [],
       grouped_suggestions: [],
@@ -959,9 +964,10 @@ describe("App with a user workspace", () => {
     shell();
     render(App);
 
-    // Fixed workspaces never show in the generic section.
+    // Fixed workspaces never show in the generic Workspaces section — Home
+    // has its own dedicated entry at the top.
     await screen.findByText("Project A");
-    expect(screen.queryByText("Home")).toBeNull();
+    expect(screen.queryByText("Workspaces")).toBeTruthy();
 
     await userEvent.click(screen.getByText("Project A"));
     expect(await screen.findByText("Sprint")).toBeTruthy();
@@ -1063,27 +1069,19 @@ describe("NotesWidget", () => {
     );
   });
 
-  test("opening a note hands over to the editor", async () => {
-    bridge({
-      list_notes: [entry("Ideia")],
-      note_folders: [],
-      read_note: {
-        path: "Inbox/Ideia.md",
-        title: "Ideia",
-        body: "Corpo da nota.\n",
-        pinned: false,
-        created: "2026-07-21",
-      },
-    });
+  test("opening a note reports it upwards instead of embedding an editor", async () => {
+    // A note becomes a document tab, the same as a list — deciding that is
+    // the shell's business, not this screen's.
+    const opened = [];
+    bridge({ list_notes: [entry("Ideia")], note_folders: [] });
 
-    render(NotesWidget, { props: props() });
+    render(NotesWidget, {
+      props: props({ onOpenNote: (path, folder) => opened.push([path, folder]) }),
+    });
     await userEvent.click(await screen.findByText("Ideia"));
 
-    expect(await screen.findByDisplayValue("Corpo da nota.")).toBeTruthy();
-    expect(invoke).toHaveBeenCalledWith("read_note", {
-      folder: "Notes",
-      path: "Inbox/Ideia.md",
-    });
+    expect(opened).toEqual([["Inbox/Ideia.md", "Notes"]]);
+    expect(invoke.mock.calls.some(([cmd]) => cmd === "read_note")).toBe(false);
   });
 
   test("the folder view filters to the folder being looked at", async () => {
@@ -1291,5 +1289,199 @@ describe("NotesWidget folder management", () => {
 
     await openClientes();
     expect(screen.queryByText("delete folder")).toBeNull();
+  });
+});
+
+describe("HomeView", () => {
+  const props = (extra = {}) => ({
+    notesFolder: "Notes",
+    notesInbox: "Inbox",
+    folders: ["Inbox", "Clientes"],
+    readOnly: false,
+    onChanged: noop,
+    onError: noop,
+    onOpenNote: noop,
+    onSelectTask: noop,
+    selectedId: null,
+    reloadKey: 0,
+    ...extra,
+  });
+
+  test("shows the day's tasks and the notes written today", async () => {
+    bridge({
+      period_tasks: [{ path: "Tasks/Inbox.md", task: task("a1", "Arrumar site") }],
+      notes_created_today: [
+        {
+          path: "Inbox/ideia.md",
+          title: "ideia",
+          folder: "Inbox",
+          preview: "uma ideia",
+          created: "2026-07-21",
+          pinned: false,
+        },
+      ],
+    });
+
+    render(HomeView, { props: props() });
+
+    expect(await screen.findByText("Arrumar site")).toBeTruthy();
+    expect(screen.getByText("ideia")).toBeTruthy();
+    // The Home owns no notes: it asks for today's, it does not store them.
+    expect(invoke).toHaveBeenCalledWith("notes_created_today", { folder: "Notes" });
+  });
+
+  test("the quick note goes to the chosen folder, in one call", async () => {
+    bridge({ period_tasks: [], notes_created_today: [], quick_capture_note: "Inbox/x.md" });
+
+    render(HomeView, { props: props() });
+    // Enter saves; Shift+Enter would be a new line.
+    await userEvent.type(
+      await screen.findByLabelText("Quick note…"),
+      "Comprar cimento{Enter}",
+    );
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("quick_capture_note", {
+        folder: "Notes",
+        inFolder: "Inbox",
+        text: "Comprar cimento",
+      }),
+    );
+  });
+
+  test("a read-only notebook offers no capture box", async () => {
+    bridge({ period_tasks: [], notes_created_today: [] });
+
+    render(HomeView, { props: props({ readOnly: true }) });
+
+    await screen.findByText("Nothing chosen for today yet.");
+    expect(screen.queryByLabelText("Quick note…")).toBeNull();
+  });
+});
+
+describe("App shell with tabs", () => {
+  const notebook = {
+    path: "/n",
+    name: "n",
+    readOnly: false,
+    lists: [
+      { path: "Tasks/Inbox.md", name: "Inbox" },
+      { path: "Tasks/Compras.md", name: "Compras" },
+      { path: "Tasks/Completed.md", name: "Completed" },
+    ],
+    layout: {
+      inbox: "Tasks/Inbox.md",
+      completed: "Tasks/Completed.md",
+      tasksFolder: "Tasks",
+      completedName: "Completed",
+      notesFolder: "Notes",
+      notesInbox: "Inbox",
+    },
+  };
+
+  const shell = (extra = {}) =>
+    bridge({
+      last_notebook: "/n",
+      open_notebook: notebook,
+      notebook_snapshot: {
+        info: notebook,
+        clock: {
+          today: "2026-07-21",
+          weekStart: "2026-07-20",
+          nextDailyTurn: "2026-07-22T00:00:00Z",
+          nextWeeklyTurn: "2026-07-27T00:00:00Z",
+        },
+        counts: {},
+        conflicts: [],
+        workspaces: [],
+      },
+      screen_to_restore: null,
+      note_folders: ["Inbox"],
+      notes_created_today: [],
+      period_tasks: [],
+      grouped_suggestions: [],
+      list_tasks: [],
+      ...extra,
+    });
+
+  /// The tab strip's labels, in order.
+  const tabLabels = () =>
+    screen.getAllByRole("tab").map((el) => el.textContent.trim());
+
+  test("opens on Home, in a tab", async () => {
+    shell();
+    render(App);
+
+    await waitFor(() => expect(tabLabels()).toEqual(["Home"]));
+  });
+
+  test("opening two screens opens two tabs, and reopening focuses", async () => {
+    shell();
+    render(App);
+    await waitFor(() => expect(tabLabels().length).toBe(1));
+
+    await userEvent.click(screen.getByRole("button", { name: /^Compras/ }));
+    await waitFor(() => expect(tabLabels()).toEqual(["Home", "Compras"]));
+
+    // Reopening a screen that is already in a tab focuses it instead of
+    // filling the bar with copies.
+    await userEvent.click(screen.getByRole("button", { name: "Home" }));
+    expect(tabLabels()).toEqual(["Home", "Compras"]);
+    expect(screen.getAllByRole("tab")[0].getAttribute("aria-selected")).toBe("true");
+  });
+
+  test("closing a tab lands on its neighbour, and the last one stays", async () => {
+    shell();
+    render(App);
+    await waitFor(() => expect(tabLabels().length).toBe(1));
+
+    await userEvent.click(screen.getByRole("button", { name: /^Compras/ }));
+    await waitFor(() => expect(tabLabels().length).toBe(2));
+
+    await userEvent.click(screen.getAllByLabelText("close tab")[1]);
+    await waitFor(() => expect(tabLabels()).toEqual(["Home"]));
+
+    // The last tab has no close button: an app with no tab has nothing to
+    // show and no way back.
+    expect(screen.queryByLabelText("close tab")).toBeNull();
+  });
+
+  test("the arrows walk the active tab's own history", async () => {
+    shell();
+    render(App);
+    await waitFor(() => expect(tabLabels().length).toBe(1));
+
+    // Navigating inside a tab (deleting a list sends you to the Inbox) is
+    // what fills its history; opening from the sidebar makes new tabs.
+    expect(screen.getByLabelText("back").disabled).toBe(true);
+    expect(screen.getByLabelText("forward").disabled).toBe(true);
+  });
+
+  test("the page menu offers the actions of the screen it is on", async () => {
+    shell();
+    render(App);
+    await waitFor(() => expect(tabLabels().length).toBe(1));
+
+    // On a list, the menu renames and deletes it.
+    await userEvent.click(screen.getByRole("button", { name: /^Compras/ }));
+    await userEvent.click(await screen.findByLabelText("page menu"));
+    expect(await screen.findByText("rename list")).toBeTruthy();
+    expect(screen.getByText("delete list")).toBeTruthy();
+  });
+
+  test("the Inbox offers no delete in the page menu", async () => {
+    // It is recreated on every open, so offering to delete it would lie.
+    shell();
+    render(App);
+    await waitFor(() => expect(tabLabels().length).toBe(1));
+
+    await userEvent.click(screen.getByRole("button", { name: /^Inbox/ }));
+    await userEvent.click(await screen.findByLabelText("page menu"));
+
+    expect(screen.queryByText("delete list")).toBeNull();
+    expect(screen.queryByText("rename list")).toBeNull();
+    // The menu still exists — it just offers what makes sense here. Two
+    // matches: the sidebar button and the one the menu added.
+    expect(screen.getAllByText("+ new list").length).toBe(2);
   });
 });

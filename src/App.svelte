@@ -1,6 +1,12 @@
 <script>
-  // Phase 4: the app is usable end to end, still without design.
-  // Everything visual here is placeholder — phase 5 rebuilds it from Figma.
+  // The shell: three panels, document tabs, and the router that decides which
+  // screen a tab is showing.
+  //
+  // Phase 8.5 put the pieces where the wireframe puts them. What this file
+  // owns is arrangement and navigation; every screen below it owns its own
+  // data, and every rule about tabs lives in `tabs.js`. Design comes in
+  // phase 10, on top of a token layer that does not exist yet — so the CSS
+  // here is still structural on purpose.
   import { listen } from "@tauri-apps/api/event";
   import { api, describeError } from "./lib/api.js";
   import ListView from "./lib/ListView.svelte";
@@ -9,12 +15,16 @@
   import TaskInspector from "./lib/TaskInspector.svelte";
   import WorkspaceView from "./lib/WorkspaceView.svelte";
   import NotesWidget from "./lib/NotesWidget.svelte";
+  import NoteEditor from "./lib/NoteEditor.svelte";
+  import HomeView from "./lib/HomeView.svelte";
+  import TabBar from "./lib/TabBar.svelte";
+  import PageHeader from "./lib/PageHeader.svelte";
   import { listName } from "./lib/paths.js";
   import { S } from "./lib/strings.js";
+  import * as Tabs from "./lib/tabs.js";
 
   let notebook = $state(null);
   let clock = $state(null);
-  let view = $state({ kind: "period", period: "day" });
   let error = $state(null);
   let busy = $state(true);
   /// Bumped to tell the open screen to re-read from disk.
@@ -22,18 +32,31 @@
   let counts = $state({});
   let conflicts = $state([]);
   let workspaces = $state([]);
+  let noteFolders = $state([]);
   /// The task open in the right-hand panel, as `{ list, task }`.
   let selected = $state(null);
 
-  const select = (list, task) => (selected = { list, task });
+  // Tabs. The active tab's current view is what the centre panel shows.
+  let tabs = $state([{ views: [{ kind: "home" }], at: 0 }]);
+  let active = $state(0);
+  let view = $derived(Tabs.currentView(tabs[active]) ?? { kind: "home" });
 
-  // Closing the inspector by clicking away was tried and removed on
-  // 2026-07-21: even scoped to the empty space it fired too easily, and losing
-  // the panel mid-edit costs more than the convenience is worth. It is written
-  // down as `closeInspectorOnClickAway` in config.md, default off, to be
-  // decided again when there is a settings screen to turn it on from.
-  //
-  // What closes it now: the × in the panel, Escape, and changing screen.
+  /// Opens a view in its own tab (focusing it if already open).
+  function openTab(next) {
+    ({ tabs, active } = Tabs.open(tabs, active, next));
+  }
+
+  /// Navigates the active tab, replacing what it shows.
+  function goTo(next) {
+    ({ tabs, active } = Tabs.navigate(tabs, active, next));
+  }
+
+  const closeTab = (i) => ({ tabs, active } = Tabs.close(tabs, active, i));
+  const goBack = () => ({ tabs, active } = Tabs.back(tabs, active));
+  const goForward = () => ({ tabs, active } = Tabs.forward(tabs, active));
+
+  const isOpen = (v) => Tabs.viewId(view) === Tabs.viewId(v);
+
   function onKeydown(event) {
     if (event.key !== "Escape" || !selected) return;
     // A native date picker eats Escape to dismiss its own popup. Closing the
@@ -42,50 +65,38 @@
     selected = null;
   }
 
-  /// A screen as a string, so the shell can store it without knowing what a
-  /// screen is. Same strings go back through `restoreView`.
-  function viewToId(v) {
-    if (v.kind === "period") return v.period;
-    if (v.kind === "list") return `list:${v.list}`;
-    if (v.kind === "workspace") return `ws:${v.ws}`;
-    if (v.kind === "notes") return "notes";
-    return v.kind;
-  }
-
-  function restoreView(id) {
-    if (!id) return null;
-    if (id === "day" || id === "week") return { kind: "period", period: id };
-    if (id === "completed") return { kind: "completed" };
-    if (id.startsWith("list:")) return { kind: "list", list: id.slice(5) };
-    if (id.startsWith("ws:")) return { kind: "workspace", ws: id.slice(3) };
-    if (id === "notes") return { kind: "notes" };
-    return null;
-  }
-
-  // Records where the user is. The shell ignores this when the notebook has
-  // the preference off, so no check is needed here.
-  $effect(() => {
-    const id = viewToId(view);
-    if (notebook) api.rememberScreen(id).catch(() => {});
-  });
+  const select = (list, task) => (selected = { list, task });
 
   // Leaving a screen closes the inspector — it would otherwise keep showing a
   // task from a list that is no longer visible.
   //
-  // This depends on `view` and nothing else, on purpose. It used to read
-  // `notebook` as well, and since every save refreshes the notebook, the
-  // panel slammed shut on each auto-save: picking a month in the date field
-  // closed the panel before the day could be chosen.
+  // Depends on the active view and nothing else, on purpose: it used to read
+  // `notebook` too, and since every save refreshes the notebook, the panel
+  // slammed shut on each auto-save.
   $effect(() => {
-    view;
+    Tabs.viewId(view);
     selected = null;
   });
 
-  // The addresses the core creates come over the bridge with the notebook.
-  // The frontend used to mirror them in a names.js — and when the core
-  // renamed the completed list, the mirror went stale and the screen read a
-  // file that no longer existed. Since phase 7 these are paths, and each
-  // list arrives as { path, name }.
+  // Records where the user is, for `restoreLastScreen`.
+  $effect(() => {
+    const id = Tabs.viewId(view);
+    if (notebook) api.rememberScreen(id).catch(() => {});
+  });
+
+  function restoreView(id) {
+    if (!id) return null;
+    if (id === "day" || id === "week") return { kind: "period", period: id };
+    if (id === "home" || id === "completed" || id === "notes") return { kind: id };
+    if (id.startsWith("list:")) return { kind: "list", list: id.slice(5) };
+    if (id.startsWith("ws:")) return { kind: "workspace", ws: id.slice(3) };
+    return null;
+  }
+
+  // The addresses the core creates travel with the notebook. The frontend
+  // used to mirror them in a names.js, and when the core renamed the
+  // completed list the mirror went stale and a screen read a file that no
+  // longer existed.
   let layout = $derived(
     notebook?.layout ?? {
       inbox: "Tasks/Inbox.md",
@@ -108,9 +119,51 @@
     ),
   );
 
-  // User workspaces get the generic widget runtime; the three fixed ones
-  // keep their dedicated navigation until the phase 8.5 shell.
   let userWorkspaces = $derived(workspaces.filter((ws) => !ws.fixed));
+
+  /// What a tab calls itself. Titles are derived, never stored: renaming a
+  /// list has to reach the tab showing it.
+  function titleOf(v) {
+    switch (v?.kind) {
+      case "home":
+        return S.home;
+      case "period":
+        return v.period === "day" ? S.today : S.week;
+      case "notes":
+        return S.notes;
+      case "completed":
+        return S.completed;
+      case "list":
+        return listName(v.list);
+      case "note":
+        return listName(v.path);
+      case "workspace":
+        return (
+          workspaces.find((w) => w.folderName === v.ws)?.name ?? v.ws
+        );
+      default:
+        return S.untitled;
+    }
+  }
+
+  /// The page menu of the current screen — the `•••` of the wireframe.
+  let pageMenu = $derived.by(() => {
+    if (notebook?.readOnly) return [];
+    const items = [{ label: S.newListButton, run: createList }];
+    // Renaming or deleting a list the app recreates on every open would only
+    // confuse — the core refuses it anyway, so the menu must not offer it.
+    if (
+      view.kind === "list" &&
+      view.list !== layout.inbox &&
+      view.list !== layout.completed
+    ) {
+      items.unshift(
+        { label: S.renameList, run: renameCurrentList },
+        { label: S.deleteList, run: deleteCurrentList },
+      );
+    }
+    return items;
+  });
 
   function fail(e) {
     error = describeError(e);
@@ -120,8 +173,7 @@
   const reload = () => (reloadKey += 1);
 
   // One round trip instead of four: the auto-save calls this on every pause
-  // in typing, so the fan-out (info + clock + counts + conflicts) was the
-  // hottest path in the app.
+  // in typing, so the fan-out was the hottest path in the app.
   async function refreshNotebook() {
     try {
       const snap = await api.notebookSnapshot();
@@ -130,6 +182,7 @@
       counts = snap.counts;
       conflicts = snap.conflicts;
       workspaces = snap.workspaces ?? [];
+      noteFolders = await api.noteFolders(snap.info.layout.notesFolder);
     } catch {
       // No notebook open (or it just closed): back to onboarding.
       notebook = null;
@@ -143,10 +196,8 @@
       notebook = await api.openNotebook(path);
       await refreshNotebook();
 
-      // Only after the notebook is open do we know whether it wants the last
-      // screen back.
       const restored = restoreView(await api.screenToRestore());
-      if (restored) view = restored;
+      if (restored) goTo(restored);
 
       scheduleTurn();
       reload();
@@ -172,10 +223,7 @@
     try {
       await api.createList(layout.tasksFolder, name.trim());
       await refreshNotebook();
-      view = {
-        kind: "list",
-        list: `${layout.tasksFolder}/${name.trim()}.md`,
-      };
+      openTab({ kind: "list", list: `${layout.tasksFolder}/${name.trim()}.md` });
     } catch (e) {
       fail(e);
     }
@@ -183,15 +231,18 @@
 
   async function renameCurrentList() {
     if (view.kind !== "list") return;
-    const current = listName(view.list);
+    const from = view.list;
+    const current = listName(from);
     const to = prompt(S.promptRenameList(current), current);
     if (!to || to.trim() === current) return;
     try {
-      await api.renameList(view.list, to.trim());
+      await api.renameList(from, to.trim());
       await refreshNotebook();
-      // A rename never changes the folder: swap only the file name.
-      const dir = view.list.slice(0, view.list.lastIndexOf("/"));
-      view = { kind: "list", list: `${dir}/${to.trim()}.md` };
+      // A rename never changes the folder: swap only the file name, and let
+      // the tab follow the file instead of pointing at a name that is gone.
+      const dir = from.slice(0, from.lastIndexOf("/"));
+      const next = { kind: "list", list: `${dir}/${to.trim()}.md` };
+      tabs = Tabs.replaceView(tabs, Tabs.viewId({ kind: "list", list: from }), next);
       reload();
     } catch (e) {
       fail(e);
@@ -201,18 +252,13 @@
   async function deleteCurrentList() {
     if (view.kind !== "list") return;
     const list = view.list;
-    if (
-      !confirm(S.confirmDeleteList(listName(list)))
-    )
-      return;
+    if (!confirm(S.confirmDeleteList(listName(list)))) return;
     try {
       const rescued = await api.deleteList(list);
       await refreshNotebook();
-      view = { kind: "list", list: layout.inbox };
+      goTo({ kind: "list", list: layout.inbox });
       reload();
-      if (rescued > 0) {
-        error = S.tasksRescued(rescued, listName(list));
-      }
+      if (rescued > 0) error = S.tasksRescued(rescued, listName(list));
     } catch (e) {
       fail(e);
     }
@@ -264,6 +310,9 @@
       busy = false;
     }
   })();
+
+  const openNote = (path) =>
+    openTab({ kind: "note", folder: layout.notesFolder, path });
 </script>
 
 <svelte:window onkeydown={onKeydown} />
@@ -272,169 +321,219 @@
   {#if !notebook}
     <section class="onboarding">
       <h1>Memo</h1>
-      <p>
-        {S.onboardingIntro}
-      </p>
-      <button onclick={chooseFolder} disabled={busy}>
-        {S.chooseFolder}
-      </button>
+      <p>{S.onboardingIntro}</p>
+      <button onclick={chooseFolder} disabled={busy}>{S.chooseFolder}</button>
       {#if error}<p class="error">{error}</p>{/if}
     </section>
   {:else}
     <div class="app" class:with-panel={selected}>
+      <!-- LEFT: workspaces on top, notebook and settings pinned to the
+           bottom, as the wireframe has them. -->
       <nav>
-        <div class="notebook" title={notebook.path}>
-          <strong>{notebook.name}</strong>
-          {#if notebook.readOnly}<span class="ro">{S.readOnly}</span>{/if}
-        </div>
-
-        <button
-          class:active={view.kind === "period" && view.period === "day"}
-          onclick={() => (view = { kind: "period", period: "day" })}>{S.today}</button
-        >
-        <button
-          class:active={view.kind === "period" && view.period === "week"}
-          onclick={() => (view = { kind: "period", period: "week" })}
-          >{S.week}</button
-        >
-        <button
-          class:active={view.kind === "notes"}
-          onclick={() => (view = { kind: "notes" })}>{S.notes}</button
-        >
-
-        <hr />
-        {#each userLists as entry (entry.path)}
+        <div class="nav-scroll">
           <button
-            class:active={view.kind === "list" && view.list === entry.path}
-            onclick={() => (view = { kind: "list", list: entry.path })}
+            class:active={isOpen({ kind: "home" })}
+            onclick={() => openTab({ kind: "home" })}>{S.home}</button
           >
-            {entry.name}
-            {#if counts[entry.path]}<span class="count">{counts[entry.path]}</span
-              >{/if}
-          </button>
-        {/each}
+          <button
+            class:active={isOpen({ kind: "period", period: "day" })}
+            onclick={() => openTab({ kind: "period", period: "day" })}
+            >{S.today}</button
+          >
+          <button
+            class:active={isOpen({ kind: "period", period: "week" })}
+            onclick={() => openTab({ kind: "period", period: "week" })}
+            >{S.week}</button
+          >
+          <button
+            class:active={isOpen({ kind: "notes" })}
+            onclick={() => openTab({ kind: "notes" })}>{S.notes}</button
+          >
 
-        {#if userWorkspaces.length > 0}
           <hr />
-          <small class="section">{S.workspacesTitle}</small>
-          {#each userWorkspaces as ws (ws.folderName)}
+          {#each userLists as entry (entry.path)}
             <button
-              class:active={view.kind === "workspace" && view.ws === ws.folderName}
-              onclick={() => (view = { kind: "workspace", ws: ws.folderName })}
+              class:active={isOpen({ kind: "list", list: entry.path })}
+              onclick={() => openTab({ kind: "list", list: entry.path })}
             >
-              {ws.name}
+              {entry.name}
+              {#if counts[entry.path]}<span class="count"
+                  >{counts[entry.path]}</span
+                >{/if}
             </button>
           {/each}
-        {/if}
 
-        <hr />
-        <button
-          class:active={view.kind === "completed"}
-          onclick={() => (view = { kind: "completed" })}>{S.completed}</button
-        >
+          {#if userWorkspaces.length > 0}
+            <hr />
+            <small class="section">{S.workspacesTitle}</small>
+            {#each userWorkspaces as ws (ws.folderName)}
+              <button
+                class:active={isOpen({ kind: "workspace", ws: ws.folderName })}
+                onclick={() => openTab({ kind: "workspace", ws: ws.folderName })}
+              >
+                {ws.name}
+              </button>
+            {/each}
+          {/if}
 
-        {#if !notebook.readOnly}
-          <button class="secondary" onclick={createList}>{S.newListButton}</button>
-        {/if}
-        <button class="secondary" onclick={chooseFolder}>{S.switchNotebook}</button>
+          <hr />
+          <button
+            class:active={isOpen({ kind: "completed" })}
+            onclick={() => openTab({ kind: "completed" })}>{S.completed}</button
+          >
+          {#if !notebook.readOnly}
+            <button class="secondary" onclick={createList}
+              >{S.newListButton}</button
+            >
+          {/if}
+        </div>
+
+        <div class="nav-bottom" title={notebook.path}>
+          <button class="secondary" onclick={chooseFolder}>
+            {notebook.name}
+            {#if notebook.readOnly}<span class="ro">{S.readOnly}</span>{/if}
+          </button>
+        </div>
       </nav>
 
-      <section class="content">
-        {#if error}
-          <p class="error">{error} <button onclick={() => (error = null)}>{S.dismissError}</button></p>
-        {/if}
+      <!-- CENTRE: tabs, page header, then the screen itself. -->
+      <section class="centre">
+        <TabBar
+          {tabs}
+          {active}
+          {titleOf}
+          onSelect={(i) => (active = i)}
+          onClose={closeTab}
+        />
+        <PageHeader
+          title={titleOf(view)}
+          subtitle={view.kind === "home" ? (clock?.today ?? "") : ""}
+          canBack={Tabs.canGoBack(tabs[active])}
+          canForward={Tabs.canGoForward(tabs[active])}
+          onBack={goBack}
+          onForward={goForward}
+          menu={pageMenu}
+        />
 
-        {#if conflicts.length > 0}
-          <!-- The one case where the user can silently lose work: two devices
-               edited the same list and the sync tool kept both. -->
-          <div class="conflict">
-            <strong
-              >{S.conflictsTitle(conflicts.length)}</strong
-            >
-            <p>
-              {S.conflictsBody}
-            </p>
-            <ul>
-              {#each conflicts as conflict}
-                <li>
-                  {#if conflict.list}<strong>{conflict.list}</strong>{/if}
-                  <code>{conflict.path}</code>
-                </li>
-              {/each}
-            </ul>
-          </div>
-        {/if}
-
-        {#if view.kind === "period"}
-          <PeriodView
-            period={view.period}
-            {clock}
-            readOnly={notebook.readOnly}
-            onChanged={refreshNotebook}
-            onError={fail}
-            {reloadKey}
-            onSelect={select}
-            selectedId={selected?.task?.id ?? null}
-          />
-        {:else if view.kind === "list"}
-          <ListView
-            list={view.list}
-            readOnly={notebook.readOnly}
-            onChanged={refreshNotebook}
-            onError={fail}
-            {reloadKey}
-            onSelect={select}
-            selectedId={selected?.task?.id ?? null}
-          />
-          {#if !notebook.readOnly && view.list !== layout.inbox}
-            <p class="list-actions">
-              <button onclick={renameCurrentList}>{S.renameList}</button>
-              <button onclick={deleteCurrentList}>{S.deleteList}</button>
+        <div class="content">
+          {#if error}
+            <p class="error">
+              {error}
+              <button onclick={() => (error = null)}>{S.dismissError}</button>
             </p>
           {/if}
-        {:else if view.kind === "notes"}
-          <!-- The fixed Notes workspace is one notes widget at its root; the
-               shell renders it directly instead of going through the generic
-               workspace runtime, the same way Today and the lists are direct. -->
-          <NotesWidget
-            widget={{ kind: "notes", folder: layout.notesFolder }}
-            readOnly={notebook.readOnly}
-            notesInbox={layout.notesInbox}
-            {reloadKey}
-            onChanged={refreshNotebook}
-            onError={fail}
-          />
-        {:else if view.kind === "workspace"}
-          {@const current = userWorkspaces.find((w) => w.folderName === view.ws)}
-          {#if current}
-            <WorkspaceView
-              workspace={current}
-              lists={notebook.lists}
-              {counts}
-              completedName={layout.completedName}
+
+          {#if conflicts.length > 0}
+            <!-- The one case where the user can silently lose work: two
+                 devices edited the same file and the sync tool kept both. -->
+            <div class="conflict">
+              <strong>{S.conflictsTitle(conflicts.length)}</strong>
+              <p>{S.conflictsBody}</p>
+              <ul>
+                {#each conflicts as conflict}
+                  <li>
+                    {#if conflict.list}<strong>{conflict.list}</strong>{/if}
+                    <code>{conflict.path}</code>
+                  </li>
+                {/each}
+              </ul>
+            </div>
+          {/if}
+
+          {#if view.kind === "home"}
+            <HomeView
+              notesFolder={layout.notesFolder}
               notesInbox={layout.notesInbox}
+              folders={noteFolders}
               readOnly={notebook.readOnly}
               {reloadKey}
-              onOpenList={(path) => (view = { kind: "list", list: path })}
               onChanged={refreshNotebook}
               onError={fail}
+              onOpenNote={openNote}
+              onSelectTask={select}
+              selectedId={selected?.task?.id ?? null}
             />
+          {:else if view.kind === "period"}
+            <PeriodView
+              period={view.period}
+              {clock}
+              readOnly={notebook.readOnly}
+              onChanged={refreshNotebook}
+              onError={fail}
+              {reloadKey}
+              onSelect={select}
+              selectedId={selected?.task?.id ?? null}
+            />
+          {:else if view.kind === "list"}
+            <ListView
+              list={view.list}
+              readOnly={notebook.readOnly}
+              onChanged={refreshNotebook}
+              onError={fail}
+              {reloadKey}
+              onSelect={select}
+              selectedId={selected?.task?.id ?? null}
+            />
+          {:else if view.kind === "notes"}
+            <NotesWidget
+              widget={{ kind: "notes", folder: layout.notesFolder }}
+              readOnly={notebook.readOnly}
+              notesInbox={layout.notesInbox}
+              {reloadKey}
+              onChanged={refreshNotebook}
+              onError={fail}
+              onOpenNote={openNote}
+            />
+          {:else if view.kind === "note"}
+            <NoteEditor
+              folder={view.folder}
+              path={view.path}
+              readOnly={notebook.readOnly}
+              onSaved={refreshNotebook}
+              onError={fail}
+              onClose={() => closeTab(active)}
+              onRenamed={(path) => {
+                const from = Tabs.viewId(view);
+                tabs = Tabs.replaceView(tabs, from, {
+                  kind: "note",
+                  folder: view.folder,
+                  path,
+                });
+              }}
+            />
+          {:else if view.kind === "workspace"}
+            {@const current = userWorkspaces.find((w) => w.folderName === view.ws)}
+            {#if current}
+              <WorkspaceView
+                workspace={current}
+                lists={notebook.lists}
+                {counts}
+                completedName={layout.completedName}
+                notesInbox={layout.notesInbox}
+                readOnly={notebook.readOnly}
+                {reloadKey}
+                onOpenList={(path) => openTab({ kind: "list", list: path })}
+                onOpenNote={(path, folder) =>
+                  openTab({ kind: "note", folder, path })}
+                onChanged={refreshNotebook}
+                onError={fail}
+              />
+            {:else}
+              <p class="empty-ws">{S.emptyWorkspace}</p>
+            {/if}
           {:else}
-            <p class="empty-ws">{S.emptyWorkspace}</p>
+            <CompletedView
+              readOnly={notebook.readOnly}
+              completedList={layout.completed}
+              onChanged={refreshNotebook}
+              onError={fail}
+              {reloadKey}
+            />
           {/if}
-        {:else}
-          <CompletedView
-            readOnly={notebook.readOnly}
-            completedList={layout.completed}
-            onChanged={refreshNotebook}
-            onError={fail}
-            {reloadKey}
-          />
-        {/if}
+        </div>
       </section>
 
-      <!-- The third pane only exists while a task is open. Phase 8.5 turns
-           this into the permanent inspector of the wireframe. -->
+      <!-- RIGHT: the inspector, only while a task is open. -->
       {#if selected}
         <TaskInspector
           task={selected.task}
@@ -453,7 +552,8 @@
 </main>
 
 <style>
-  /* Structural only. The real design lands in phase 5. */
+  /* Structural only. The real design lands in phase 10, on top of a token
+     layer that has to exist first. */
   main {
     font-family: system-ui, sans-serif;
     height: 100vh;
@@ -477,11 +577,21 @@
   nav {
     display: flex;
     flex-direction: column;
+    justify-content: space-between;
+    border-right: 1px solid #ccc;
+    min-height: 0;
+  }
+  .nav-scroll {
+    display: flex;
+    flex-direction: column;
     align-items: stretch;
     gap: 0.25rem;
     padding: 0.75rem;
-    border-right: 1px solid #ccc;
     overflow-y: auto;
+  }
+  .nav-bottom {
+    border-top: 1px solid #ddd;
+    padding: 0.5rem 0.75rem;
   }
   nav button {
     text-align: left;
@@ -503,26 +613,21 @@
     color: #555;
     font-size: 0.85rem;
   }
-  .section {
-    color: #888;
-    font-size: 0.7rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    padding: 0.25rem 0.5rem 0;
-  }
-  .empty-ws {
-    color: #666;
-  }
-  .notebook {
-    padding: 0.25rem 0.5rem 0.5rem;
-    font-size: 0.9rem;
+  .nav-bottom button {
+    width: 100%;
   }
   .ro {
     display: block;
     color: #b00;
     font-size: 0.8rem;
   }
+  .centre {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
   .content {
+    flex: 1;
     padding: 1rem;
     overflow-y: auto;
   }
@@ -554,10 +659,15 @@
     font-size: 0.85rem;
     font-weight: normal;
   }
-  .list-actions {
-    margin-top: 2rem;
-    display: flex;
-    gap: 0.5rem;
+  .section {
+    color: #888;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.25rem 0.5rem 0;
+  }
+  .empty-ws {
+    color: #666;
   }
   hr {
     border: none;

@@ -18,6 +18,7 @@
     readOnly = false,
     reloadKey = 0,
     onOpenList,
+    onOpenNote,
     onChanged,
     onError,
   } = $props();
@@ -42,6 +43,7 @@
       {readOnly}
       {reloadKey}
       {onOpenList}
+      {onOpenNote}
       {onChanged}
       {onError}
     />

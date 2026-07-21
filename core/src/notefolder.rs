@@ -146,6 +146,37 @@ impl NoteFolder {
         Ok(found)
     }
 
+    /// Notes created on `date` — what the Home screen shows.
+    ///
+    /// The Home has **no notes of its own** (spec 5): it is a view of the
+    /// inbox filtered by `created`, so nothing is ever moved on the turn of
+    /// the day. A note written by hand outside the app has no `created` and
+    /// therefore never shows up here — correct, since the app has no idea
+    /// when it was written and inventing a date would be worse.
+    pub fn created_on(&self, date: NaiveDate) -> Result<Vec<NoteEntry>> {
+        Ok(self
+            .notes()?
+            .into_iter()
+            .filter(|note| note.created == Some(date))
+            .collect())
+    }
+
+    /// Writes a note from a single blob of text — the Home's quick capture.
+    ///
+    /// The first line becomes the title, the whole text the body: someone
+    /// jotting an idea types the idea, not a file name. Returns the address.
+    pub fn quick_capture(
+        &self,
+        folder: &str,
+        text: &str,
+        today: NaiveDate,
+    ) -> Result<String> {
+        let title = title_from(text);
+        let path = self.create(folder, &title, today)?;
+        self.write(&path, text, today)?;
+        Ok(path)
+    }
+
     pub fn read(&self, relative: &str) -> Result<Note> {
         let path = self.note_path(relative)?;
         let text = std::fs::read_to_string(&path).ctx(&path)?;
@@ -405,6 +436,36 @@ fn join_relative(folder: &str, name: &str) -> String {
         name.to_string()
     } else {
         format!("{folder}/{name}")
+    }
+}
+
+/// The title a blob of text gets when the user did not give one: its first
+/// non-empty line, trimmed to something that reads as a name.
+fn title_from(text: &str) -> String {
+    const MAX: usize = 60;
+    let first = text
+        .lines()
+        .map(str::trim)
+        // A pasted markdown heading is still the title, without its `#`.
+        .map(|line| line.trim_start_matches('#').trim())
+        .find(|line| !line.is_empty())
+        .unwrap_or_default();
+
+    let mut title = String::new();
+    for word in first.split_whitespace() {
+        if !title.is_empty() && title.len() + word.len() + 1 > MAX {
+            break;
+        }
+        if !title.is_empty() {
+            title.push(' ');
+        }
+        title.push_str(word);
+    }
+    // Only when there is genuinely nothing to name it after.
+    if title.is_empty() {
+        "Untitled".to_string()
+    } else {
+        title
     }
 }
 

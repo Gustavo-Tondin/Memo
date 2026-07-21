@@ -307,3 +307,49 @@ fn the_notes_inbox_cannot_be_renamed_or_deleted() {
         Err(memo_core::Error::Protected(_))
     ));
 }
+
+#[test]
+fn the_home_sees_notes_created_today_without_owning_any() {
+    // Spec 5: the Home has no notes of its own — it is a view of the inbox
+    // filtered by `created`, so nothing is moved on the turn of the day.
+    let (dir, notes) = folder();
+    let yesterday = NaiveDate::from_ymd_opt(2026, 7, 20).unwrap();
+
+    notes.create("Inbox", "de hoje", today()).unwrap();
+    notes.create("Inbox", "de ontem", yesterday).unwrap();
+    // Written by hand outside the app: no `created`, so the app does not
+    // pretend to know when it was written.
+    std::fs::write(dir.path().join("Notes/Inbox/sem data.md"), "solta\n").unwrap();
+
+    let titles: Vec<String> = notes
+        .created_on(today())
+        .unwrap()
+        .into_iter()
+        .map(|n| n.title)
+        .collect();
+    assert_eq!(titles, vec!["de hoje"]);
+
+    // And the others are still right where they were.
+    assert_eq!(notes.notes().unwrap().len(), 3);
+}
+
+#[test]
+fn quick_capture_names_the_note_after_what_was_written() {
+    let (_dir, notes) = folder();
+
+    let path = notes
+        .quick_capture("Inbox", "Comprar cimento\nna loja do Jorge\n", today())
+        .unwrap();
+    assert_eq!(path, "Inbox/Comprar cimento.md");
+    assert!(notes.read(&path).unwrap().body.contains("loja do Jorge"));
+
+    // A pasted heading is still the title, without its `#`.
+    let heading = notes
+        .quick_capture("Inbox", "# Ideia grande\n\ncorpo\n", today())
+        .unwrap();
+    assert_eq!(heading, "Inbox/Ideia grande.md");
+
+    // And text with nothing nameable still becomes a note.
+    let blank = notes.quick_capture("Inbox", "   \n\n", today()).unwrap();
+    assert_eq!(blank, "Inbox/Untitled.md");
+}

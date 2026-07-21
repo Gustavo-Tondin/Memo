@@ -46,6 +46,9 @@ export const api = {
   // ("Inbox/ideia.md") — the widget owns its subtree.
   listNotes: (folder, query) => invoke("list_notes", { folder, query }),
   noteFolders: (folder) => invoke("note_folders", { folder }),
+  notesCreatedToday: (folder) => invoke("notes_created_today", { folder }),
+  quickCaptureNote: (folder, inFolder, text) =>
+    invoke("quick_capture_note", { folder, inFolder, text }),
   readNote: (folder, path) => invoke("read_note", { folder, path }),
   writeNote: (folder, path, body) => invoke("write_note", { folder, path, body }),
   createNote: (folder, inFolder, title) =>

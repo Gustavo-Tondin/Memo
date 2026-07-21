@@ -43,6 +43,22 @@ export const S = {
     "This widget's folder points outside the workspace, so it was not loaded.",
   widgetNoLists: "No lists in this widget yet.",
 
+  // Shell (phase 8.5)
+  home: "Home",
+  tasks: "Tasks",
+  closeTab: "close tab",
+  goBack: "back",
+  goForward: "forward",
+  pageMenu: "page menu",
+  todaysTasks: "TODAY'S TASKS",
+  todaysNotes: "TODAY'S NOTES",
+  quickNote: "Quick note…",
+  quickNoteTo: "to",
+  noTasksToday: "Nothing chosen for today yet.",
+  noNotesToday: "No notes written today.",
+  openSettings: "settings",
+  untitled: "Untitled",
+
   // Notes (phase 8)
   notes: "Notes",
   newNote: "+ new note",
