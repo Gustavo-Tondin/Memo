@@ -660,6 +660,41 @@ impl Notebook {
         }
     }
 
+    /// The workspaces of this notebook: every first-level folder carrying a
+    /// `.workspace.json`, alphabetically by folder name.
+    ///
+    /// Folders without the marker are ignored on purpose — a stray folder
+    /// dropped into the notebook (downloads, an attachments dir, whatever a
+    /// sync tool leaves) must never turn into interface on its own.
+    pub fn workspaces(&self) -> Result<Vec<crate::workspace::Workspace>> {
+        let mut found = Vec::new();
+        let entries = match std::fs::read_dir(&self.root) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(found),
+            Err(e) => {
+                return Err(Error::Io {
+                    path: self.root.clone(),
+                    source: e,
+                })
+            }
+        };
+
+        for entry in entries {
+            let path = entry.ctx(&self.root)?.path();
+            let hidden = path
+                .file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with('.'));
+            if !path.is_dir() || hidden {
+                continue;
+            }
+            if crate::workspace::Workspace::is_workspace(&path) {
+                found.push(crate::workspace::Workspace::open(path)?);
+            }
+        }
+        found.sort_by(|a, b| a.folder_name().cmp(b.folder_name()));
+        Ok(found)
+    }
+
     /// Starts watching this notebook for changes made outside the app.
     pub fn watch(&self) -> Result<crate::watcher::NotebookWatcher> {
         crate::watcher::NotebookWatcher::start(&self.root)

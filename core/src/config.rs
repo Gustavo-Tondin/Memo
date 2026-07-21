@@ -283,7 +283,10 @@ fn render_rollover(rollover: &Rollover) -> Value {
 
 /// Deep merge, so writing `rollover.daily.mode` does not wipe an unknown
 /// sibling key sitting next to it.
-fn merge(target: &mut Value, patch: Value) {
+///
+/// Shared with the workspace config, which makes the same promise: a key
+/// this build does not know about survives the rewrite.
+pub(crate) fn merge(target: &mut Value, patch: Value) {
     match (target, patch) {
         (Value::Object(target), Value::Object(patch)) => {
             for (key, value) in patch {

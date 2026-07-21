@@ -37,9 +37,11 @@ impl From<memo_core::Error> for CommandError {
         let kind = match &error {
             Error::Io { .. } => "io",
             Error::NotANotebook(_) => "notANotebook",
+            Error::NotAWorkspace(_) => "notAWorkspace",
             Error::AlreadyANotebook(_) => "alreadyANotebook",
             Error::TaskNotFound(_) => "taskNotFound",
             Error::InvalidListName(_) => "invalidListName",
+            Error::InvalidWidgetFolder(_) => "invalidWidgetFolder",
             Error::ReadOnlyNotebook { .. } => "readOnlyNotebook",
             Error::ProtectedList(_) => "protectedList",
             Error::Watch(_) => "watch",

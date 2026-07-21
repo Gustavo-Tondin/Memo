@@ -13,6 +13,16 @@ pub enum Error {
     #[error("{0} is not a Memo notebook")]
     NotANotebook(PathBuf),
 
+    /// The folder has no `.workspace.json`. A folder only becomes interface
+    /// by carrying the marker — never on its own.
+    #[error("{0} is not a workspace")]
+    NotAWorkspace(PathBuf),
+
+    /// A widget's `folder` tried to escape its workspace, or is malformed.
+    /// The config file is user input, same as a list name.
+    #[error("invalid widget folder {0:?}")]
+    InvalidWidgetFolder(String),
+
     #[error("{0} already contains a Memo notebook")]
     AlreadyANotebook(PathBuf),
 

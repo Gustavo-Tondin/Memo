@@ -19,6 +19,7 @@ pub mod rollover;
 pub mod state;
 pub mod task;
 pub mod watcher;
+pub mod workspace;
 
 pub use clock::{TurnOffset, WeekStart};
 pub use config::{Config, Rollover, RolloverMode};
@@ -29,6 +30,7 @@ pub use notebook::{ListedTask, Notebook, OriginAction};
 pub use state::{Period, PeriodState, StateFile, TaskRef};
 pub use watcher::{Change, NotebookWatcher};
 pub use task::Task;
+pub use workspace::{WidgetSpec, Workspace, WorkspaceConfig};
 
 /// Name of the hidden config directory inside a notebook.
 /// Equivalent to Obsidian's `.obsidian`.
