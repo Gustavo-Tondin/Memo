@@ -62,8 +62,8 @@ describe("ListView", () => {
       props: { list: "Tasks/Inbox.md", readOnly: false, onChanged: noop, onError: noop, reloadKey: 0 },
     });
 
-    await userEvent.type(await screen.findByPlaceholderText("Nova tarefa…"), "Ligar pro dentista");
-    await userEvent.click(screen.getByText("Adicionar"));
+    await userEvent.type(await screen.findByPlaceholderText("New task…"), "Ligar pro dentista");
+    await userEvent.click(screen.getByText("Add"));
 
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("create_task", {
@@ -82,7 +82,7 @@ describe("ListView", () => {
       props: { list: "Tasks/Compras.md", readOnly: false, onChanged: noop, onError: noop, reloadKey: 0 },
     });
 
-    await userEvent.click(await screen.findByLabelText("concluir"));
+    await userEvent.click(await screen.findByLabelText("complete"));
 
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("complete_task", { list: "Tasks/Compras.md", id: "a1" }),
@@ -96,7 +96,7 @@ describe("ListView", () => {
       props: { list: "Tasks/Compras.md", readOnly: false, onChanged: noop, onError: noop, reloadKey: 0 },
     });
 
-    await userEvent.click(await screen.findByText("→ Semana"));
+    await userEvent.click(await screen.findByText("→ Week"));
 
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("pull_into_period", {
@@ -139,7 +139,7 @@ describe("ListView", () => {
       props: { list: "Tasks/Compras.md", readOnly: false, onChanged: noop, onError: noop, reloadKey: 0 },
     });
 
-    await userEvent.click(await screen.findByLabelText("concluir"));
+    await userEvent.click(await screen.findByLabelText("complete"));
 
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("complete_task", {
@@ -162,7 +162,7 @@ describe("ListView", () => {
       props: { list: "Tasks/Compras.md", readOnly: false, onChanged: noop, onError: noop, reloadKey: 0 },
     });
 
-    await userEvent.click(await screen.findByText("→ Hoje"));
+    await userEvent.click(await screen.findByText("→ Today"));
 
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("pull_into_period", {
@@ -201,7 +201,7 @@ describe("ListView", () => {
     });
 
     await screen.findByText("Comprar leite");
-    expect(screen.queryByPlaceholderText("Nova tarefa…")).toBeNull();
+    expect(screen.queryByPlaceholderText("New task…")).toBeNull();
   });
 
   test("a failing command is reported instead of swallowed", async () => {
@@ -221,8 +221,8 @@ describe("ListView", () => {
       },
     });
 
-    await userEvent.type(await screen.findByPlaceholderText("Nova tarefa…"), "qualquer");
-    await userEvent.click(screen.getByText("Adicionar"));
+    await userEvent.type(await screen.findByPlaceholderText("New task…"), "qualquer");
+    await userEvent.click(screen.getByText("Add"));
 
     await waitFor(() => expect(errors.length).toBeGreaterThan(0));
     expect(errors[0].kind).toBe("io");
@@ -266,9 +266,9 @@ describe("PeriodView", () => {
 
     render(PeriodView, { props });
 
-    expect(await screen.findByText("Urgente (1)")).toBeTruthy();
-    expect(await screen.findByText("Das listas (1)")).toBeTruthy();
-    expect(screen.queryByText("Em breve (0)")).toBeNull();
+    expect(await screen.findByText("Urgent (1)")).toBeTruthy();
+    expect(await screen.findByText("From the lists (1)")).toBeTruthy();
+    expect(screen.queryByText("Soon (0)")).toBeNull();
   });
 
   test("a task created here goes through add_task_in_period", async () => {
@@ -278,10 +278,10 @@ describe("PeriodView", () => {
     render(PeriodView, { props });
 
     await userEvent.type(
-      await screen.findByPlaceholderText("Nova tarefa (vai para a Inbox)…"),
+      await screen.findByPlaceholderText("New task (goes to the Inbox)…"),
       "Responder e-mail",
     );
-    await userEvent.click(screen.getByText("Adicionar"));
+    await userEvent.click(screen.getByText("Add"));
 
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("add_task_in_period", {
@@ -302,7 +302,7 @@ describe("PeriodView", () => {
     });
 
     render(PeriodView, { props });
-    await userEvent.click(await screen.findByLabelText("concluir"));
+    await userEvent.click(await screen.findByLabelText("complete"));
 
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("complete_task", {
@@ -320,7 +320,7 @@ describe("PeriodView", () => {
     });
 
     render(PeriodView, { props });
-    await userEvent.click(await screen.findByText("tirar"));
+    await userEvent.click(await screen.findByText("remove"));
 
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("remove_from_period", {
@@ -358,8 +358,8 @@ describe("CompletedView", () => {
       props: { readOnly: false, onChanged: noop, onError: noop, reloadKey: 0 },
     });
 
-    expect(await screen.findByText("volta para Compras")).toBeTruthy();
-    await userEvent.click(screen.getByLabelText("desmarcar"));
+    expect(await screen.findByText("back to Compras")).toBeTruthy();
+    await userEvent.click(screen.getByLabelText("uncheck"));
 
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("uncomplete_task", { list: "Tasks/Completed.md", id: "a1" }));
   });
@@ -374,12 +374,12 @@ describe("CompletedView", () => {
     });
 
     await screen.findByText("Escrita à mão");
-    expect(screen.getByLabelText("desmarcar").disabled).toBe(true);
+    expect(screen.getByLabelText("uncheck").disabled).toBe(true);
   });
 
   test("reads the list by the name the core actually writes", async () => {
     // The core renamed this list to English in phase 5 and this screen kept
-    // asking for "Completas". A missing file reads as empty, so the screen
+    // asking for "Completed". A missing file reads as empty, so the screen
     // showed "nothing completed yet" forever instead of failing.
     bridge({ list_tasks: [] });
 
@@ -434,14 +434,14 @@ describe("TaskInspector", () => {
     render(TaskInspector, { props: props(task("a1", "Comprar leite")) });
 
     await screen.findByDisplayValue("Comprar leite");
-    expect(screen.queryByText("Salvar")).toBeNull();
+    expect(screen.queryByText("Save")).toBeNull();
   });
 
   test("editing saves on its own", async () => {
     bridge({ set_task_fields: null });
 
     render(TaskInspector, { props: props(task("a1", "Comprar leite")) });
-    await userEvent.type(await screen.findByPlaceholderText("Nova tag…"), "casa{enter}");
+    await userEvent.type(await screen.findByPlaceholderText("New tag…"), "casa{enter}");
 
     await waitFor(() => expect(lastSave().fields.tags).toEqual(["casa"]));
     expect(lastSave().id).toBe("a1");
@@ -455,7 +455,7 @@ describe("TaskInspector", () => {
     });
 
     render(TaskInspector, { props: props(task(null, "Escrita à mão")) });
-    await userEvent.type(await screen.findByPlaceholderText("Nova tag…"), "casa{enter}");
+    await userEvent.type(await screen.findByPlaceholderText("New tag…"), "casa{enter}");
 
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("ensure_task_id", {
@@ -477,7 +477,7 @@ describe("TaskInspector", () => {
     });
 
     render(TaskInspector, { props: props(task(null, "Escrita à mão")) });
-    const tags = await screen.findByPlaceholderText("Nova tag…");
+    const tags = await screen.findByPlaceholderText("New tag…");
 
     await userEvent.type(tags, "casa{enter}");
     await waitFor(() => expect(saveCount()).toBe(1));
@@ -498,7 +498,7 @@ describe("TaskInspector", () => {
 
     // `change`, not typing: the field only reports whole dates (see the
     // comment on the input), and clearing it is a whole value too.
-    await fireEvent.change(await screen.findByLabelText("Data"), {
+    await fireEvent.change(await screen.findByLabelText("Due date"), {
       target: { value: "" },
     });
 
@@ -514,7 +514,7 @@ describe("TaskInspector", () => {
       props: props(task("a1", "Comprar leite", { due: "2026-07-25" })),
     });
 
-    await userEvent.click(await screen.findByLabelText("limpar data"));
+    await userEvent.click(await screen.findByLabelText("clear date"));
 
     await waitFor(() => expect(lastSave().fields.due).toBe(null));
   });
@@ -524,8 +524,8 @@ describe("TaskInspector", () => {
 
     render(TaskInspector, { props: props(task("a1", "Comprar leite")) });
 
-    await screen.findByLabelText("Data");
-    expect(screen.queryByLabelText("limpar data")).toBeNull();
+    await screen.findByLabelText("Due date");
+    expect(screen.queryByLabelText("clear date")).toBeNull();
   });
 
   test("choosing a date drops focus so the calendar closes", async () => {
@@ -535,7 +535,7 @@ describe("TaskInspector", () => {
 
     render(TaskInspector, { props: props(task("a1", "Comprar leite")) });
 
-    const field = await screen.findByLabelText("Data");
+    const field = await screen.findByLabelText("Due date");
     field.focus();
     await fireEvent.change(field, { target: { value: "2026-08-01" } });
 
@@ -551,7 +551,7 @@ describe("TaskInspector", () => {
 
     render(TaskInspector, { props: props(task("a1", "Comprar leite")) });
     await userEvent.type(
-      await screen.findByPlaceholderText("Nova tag…"),
+      await screen.findByPlaceholderText("New tag…"),
       "casa nova{enter}",
     );
 
@@ -567,7 +567,7 @@ describe("TaskInspector", () => {
         task("a1", "Regar plantas", { repeat: { every: 2, unit: "week" } }),
       ),
     });
-    await userEvent.type(await screen.findByPlaceholderText("Nova tag…"), "casa{enter}");
+    await userEvent.type(await screen.findByPlaceholderText("New tag…"), "casa{enter}");
 
     await waitFor(() => expect(lastSave().fields.repeat).toBe("every-2-weeks"));
   });
@@ -580,7 +580,7 @@ describe("TaskInspector", () => {
         task("a1", "Regar plantas", { repeat: { every: 1, unit: "day" } }),
       ),
     });
-    await userEvent.type(await screen.findByPlaceholderText("Nova tag…"), "casa{enter}");
+    await userEvent.type(await screen.findByPlaceholderText("New tag…"), "casa{enter}");
 
     await waitFor(() => expect(lastSave().fields.repeat).toBe("every-day"));
   });
@@ -594,7 +594,7 @@ describe("TaskInspector", () => {
       ),
     });
     await userEvent.type(
-      await screen.findByPlaceholderText("Nova subtarefa…"),
+      await screen.findByPlaceholderText("New subtask…"),
       "Areia{enter}",
     );
 
@@ -628,7 +628,7 @@ describe("TaskInspector", () => {
     const { rerender } = render(TaskInspector, {
       props: props(task("a1", "Comprar leite"), { saveDelay: 10_000 }),
     });
-    await userEvent.type(await screen.findByPlaceholderText("Nova tag…"), "casa{enter}");
+    await userEvent.type(await screen.findByPlaceholderText("New tag…"), "casa{enter}");
 
     await rerender(props(task("b2", "Pagar boleto"), { saveDelay: 10_000 }));
 
@@ -643,7 +643,7 @@ describe("TaskInspector", () => {
     const { unmount } = render(TaskInspector, {
       props: props(task("a1", "Comprar leite"), { saveDelay: 10_000 }),
     });
-    await userEvent.type(await screen.findByPlaceholderText("Nova tag…"), "casa{enter}");
+    await userEvent.type(await screen.findByPlaceholderText("New tag…"), "casa{enter}");
 
     unmount();
 
@@ -668,7 +668,7 @@ describe("TaskInspector", () => {
         onError: (e) => errors.push(e),
       }),
     });
-    const tags = await screen.findByPlaceholderText("Nova tag…");
+    const tags = await screen.findByPlaceholderText("New tag…");
 
     await userEvent.type(tags, "casa{enter}");
     await waitFor(() => expect(errors.length).toBe(1));
@@ -686,8 +686,8 @@ describe("TaskInspector", () => {
     });
 
     await screen.findByDisplayValue("Comprar leite");
-    expect(screen.queryByPlaceholderText("Nova tag…")).toBeNull();
-    expect(screen.getByLabelText("nome da tarefa").disabled).toBe(true);
+    expect(screen.queryByPlaceholderText("New tag…")).toBeNull();
+    expect(screen.getByLabelText("task name").disabled).toBe(true);
     expect(saveCount()).toBe(0);
   });
 });
@@ -740,7 +740,7 @@ describe("App", () => {
 
   const openTask = async (text) => {
     await userEvent.click(await screen.findByText(text));
-    return await screen.findByLabelText("nome da tarefa");
+    return await screen.findByLabelText("task name");
   };
 
   test("the completed list is not offered as one of the user's lists", async () => {
@@ -750,7 +750,7 @@ describe("App", () => {
     render(App);
 
     await screen.findByText("Comprar leite");
-    const sidebar = screen.getAllByText("Completas");
+    const sidebar = screen.getAllByText("Completed");
     // Exactly one: the dedicated button, never a second entry among the lists.
     expect(sidebar.length).toBe(1);
   });
@@ -763,12 +763,12 @@ describe("App", () => {
     render(App);
 
     await openTask("Comprar leite");
-    await userEvent.type(await screen.findByPlaceholderText("Nova tag…"), "casa{enter}");
+    await userEvent.type(await screen.findByPlaceholderText("New tag…"), "casa{enter}");
 
     await waitFor(() =>
       expect(invoke.mock.calls.some(([cmd]) => cmd === "set_task_fields")).toBe(true),
     );
-    expect(screen.queryByLabelText("nome da tarefa")).not.toBeNull();
+    expect(screen.queryByLabelText("task name")).not.toBeNull();
   });
 
   test("clicking another task swaps the panel instead of closing it", async () => {
@@ -776,12 +776,12 @@ describe("App", () => {
     render(App);
 
     await openTask("Comprar leite");
-    expect(screen.getByLabelText("nome da tarefa").value).toBe("Comprar leite");
+    expect(screen.getByLabelText("task name").value).toBe("Comprar leite");
 
     await userEvent.click(screen.getByText("Pagar boleto"));
 
     await waitFor(() =>
-      expect(screen.getByLabelText("nome da tarefa").value).toBe("Pagar boleto"),
+      expect(screen.getByLabelText("task name").value).toBe("Pagar boleto"),
     );
   });
 
@@ -794,10 +794,10 @@ describe("App", () => {
 
     await openTask("Comprar leite");
 
-    await userEvent.click(screen.getByPlaceholderText("Nova tarefa…"));
+    await userEvent.click(screen.getByPlaceholderText("New task…"));
     await fireEvent.click(container.querySelector(".content"));
 
-    expect(screen.queryByLabelText("nome da tarefa")).not.toBeNull();
+    expect(screen.queryByLabelText("task name")).not.toBeNull();
   });
 
   test("escape closes the panel, except from inside a date field", async () => {
@@ -808,11 +808,11 @@ describe("App", () => {
 
     await openTask("Comprar leite");
 
-    await fireEvent.keyDown(screen.getByLabelText("Data"), { key: "Escape" });
-    expect(screen.queryByLabelText("nome da tarefa")).not.toBeNull();
+    await fireEvent.keyDown(screen.getByLabelText("Due date"), { key: "Escape" });
+    expect(screen.queryByLabelText("task name")).not.toBeNull();
 
     await fireEvent.keyDown(document.body, { key: "Escape" });
-    await waitFor(() => expect(screen.queryByLabelText("nome da tarefa")).toBeNull());
+    await waitFor(() => expect(screen.queryByLabelText("task name")).toBeNull());
   });
 
   test("changing screen closes the panel", async () => {
@@ -820,8 +820,8 @@ describe("App", () => {
     render(App);
 
     await openTask("Comprar leite");
-    await userEvent.click(screen.getByText("Hoje"));
+    await userEvent.click(screen.getByText("Today"));
 
-    await waitFor(() => expect(screen.queryByLabelText("nome da tarefa")).toBeNull());
+    await waitFor(() => expect(screen.queryByLabelText("task name")).toBeNull());
   });
 });

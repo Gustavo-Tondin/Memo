@@ -1,5 +1,6 @@
 <script>
   import { listName } from "./paths.js";
+  import { S } from "./strings.js";
 
   // One task line. Knows how to render and edit itself; every action is a
   // callback, so the screen above decides what completing means.
@@ -67,7 +68,7 @@
     type="checkbox"
     checked={task.done}
     onchange={() => onComplete(list, task)}
-    aria-label={task.done ? "desmarcar" : "concluir"}
+    aria-label={task.done ? S.uncheck : S.complete}
   />
 
   {#if editing}
@@ -84,7 +85,7 @@
       class="text"
       onclick={() => onSelect?.(list, task)}
       ondblclick={startEditing}
-      title="clique para abrir, duplo clique para renomear"
+      title={S.taskRowHint}
     >
       {task.text}
     </button>
@@ -100,7 +101,7 @@
 {#if hasFields}
   <li class="fields">
     {#if task.due}<span class="due">{formatDate(task.due)}</span>{/if}
-    {#if task.repeat}<span class="repeat" title="repete">↻</span>{/if}
+    {#if task.repeat}<span class="repeat" title={S.repeatsHint}>↻</span>{/if}
     {#if task.priority}<span class="prio">!{task.priority}</span>{/if}
     {#if task.subtasks?.length}
       <span class="sub">{doneSubtasks}/{task.subtasks.length}</span>

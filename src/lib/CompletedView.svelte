@@ -2,6 +2,7 @@
   // Completed tasks. Unchecking one sends it back to the list it came from —
   // the core reads that from the `origin` recorded in the file.
   import { api } from "./api.js";
+  import { S } from "./strings.js";
 
   // The list's on-disk name comes from the shell (NotebookInfo.layout); the
   // default only covers the instant before the first snapshot arrives.
@@ -41,10 +42,10 @@
   }
 </script>
 
-<h2>Completas</h2>
+<h2>{S.completed}</h2>
 
 {#if tasks.length === 0}
-  <p class="empty">Nada concluído ainda.</p>
+  <p class="empty">{S.nothingCompleted}</p>
 {:else}
   <ul>
     <!-- See ListView: position is part of the key so a duplicated id cannot
@@ -56,10 +57,10 @@
           checked={task.done}
           disabled={readOnly || !task.id}
           onchange={() => uncomplete(task.id)}
-          aria-label="desmarcar"
+          aria-label={S.uncheck}
         />
         <span class="done">{task.text}</span>
-        {#if task.origin}<small>volta para {task.origin}</small>{/if}
+        {#if task.origin}<small>{S.goesBackTo(task.origin)}</small>{/if}
       </li>
     {/each}
   </ul>

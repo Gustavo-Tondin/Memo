@@ -5,6 +5,7 @@
   import { api } from "./api.js";
   import { ensureTaskId } from "./taskId.js";
   import { listName } from "./paths.js";
+  import { S } from "./strings.js";
   import TaskRow from "./TaskRow.svelte";
 
   let {
@@ -74,10 +75,10 @@
     });
 
   const GROUPS = [
-    { key: "urgent", label: "Urgente" },
-    { key: "soon", label: "Em breve" },
-    { key: "thisWeek", label: "Da semana" },
-    { key: "lists", label: "Das listas" },
+    { key: "urgent", label: S.groupUrgent },
+    { key: "soon", label: S.groupSoon },
+    { key: "thisWeek", label: S.groupThisWeek },
+    { key: "lists", label: S.groupLists },
   ];
 
   let groups = $derived(
@@ -87,9 +88,9 @@
     })),
   );
 
-  let title = $derived(period === "day" ? "Hoje" : "Meta da semana");
+  let title = $derived(period === "day" ? S.today : S.weekTitle);
   let subtitle = $derived(
-    period === "day" ? clock?.today : `semana de ${clock?.weekStart ?? ""}`,
+    period === "day" ? clock?.today : S.weekOf(clock?.weekStart ?? ""),
   );
 </script>
 
@@ -97,13 +98,13 @@
 
 {#if !readOnly}
   <form onsubmit={(e) => (e.preventDefault(), add())}>
-    <input placeholder="Nova tarefa (vai para a Inbox)…" bind:value={newText} />
-    <button type="submit">Adicionar</button>
+    <input placeholder={S.newTaskToInboxPlaceholder} bind:value={newText} />
+    <button type="submit">{S.addTask}</button>
   </form>
 {/if}
 
 {#if pulled.length === 0}
-  <p class="empty">Nada escolhido ainda. Puxe algo das sugestões abaixo.</p>
+  <p class="empty">{S.nothingPulled}</p>
 {:else}
   <ul>
     {#each pulled as entry, i (`${entry.path}/${entry.task.id ?? ""}#${i}`)}
@@ -116,15 +117,15 @@
         onComplete={complete}
         onEdit={edit}
       >
-        <button onclick={() => remove(entry.path, entry.task.id)}>tirar</button>
+        <button onclick={() => remove(entry.path, entry.task.id)}>{S.removeFromPeriod}</button>
       </TaskRow>
     {/each}
   </ul>
 {/if}
 
-<h3>Sugestões</h3>
+<h3>{S.suggestionsTitle}</h3>
 {#if suggestions.length === 0}
-  <p class="empty">Nenhuma tarefa disponível.</p>
+  <p class="empty">{S.noSuggestions}</p>
 {:else}
   {#each groups as group}
     {#if group.items.length > 0}
@@ -140,7 +141,7 @@
               >
               {#if entry.task.due}<small class="due">{entry.task.due}</small>{/if}
               <small class="from">{listName(entry.path)}</small>
-              <button onclick={() => pull(entry.path, entry.task)}>puxar</button>
+              <button onclick={() => pull(entry.path, entry.task)}>{S.pull}</button>
             </li>
           {/each}
         </ul>

@@ -8,6 +8,7 @@
   import CompletedView from "./lib/CompletedView.svelte";
   import TaskInspector from "./lib/TaskInspector.svelte";
   import { listName } from "./lib/paths.js";
+  import { S } from "./lib/strings.js";
 
   let notebook = $state(null);
   let clock = $state(null);
@@ -144,7 +145,7 @@
   }
 
   async function createList() {
-    const name = prompt("Nome da nova lista:");
+    const name = prompt(S.promptNewList);
     if (!name) return;
     try {
       await api.createList(layout.tasksFolder, name.trim());
@@ -161,7 +162,7 @@
   async function renameCurrentList() {
     if (view.kind !== "list") return;
     const current = listName(view.list);
-    const to = prompt(`Novo nome para "${current}":`, current);
+    const to = prompt(S.promptRenameList(current), current);
     if (!to || to.trim() === current) return;
     try {
       await api.renameList(view.list, to.trim());
@@ -179,9 +180,7 @@
     if (view.kind !== "list") return;
     const list = view.list;
     if (
-      !confirm(
-        `Apagar "${listName(list)}"? As tarefas restantes vão para a Inbox.`,
-      )
+      !confirm(S.confirmDeleteList(listName(list)))
     )
       return;
     try {
@@ -190,7 +189,7 @@
       view = { kind: "list", list: layout.inbox };
       reload();
       if (rescued > 0) {
-        error = `${rescued} tarefa(s) de "${listName(list)}" foram movidas para a Inbox.`;
+        error = S.tasksRescued(rescued, listName(list));
       }
     } catch (e) {
       fail(e);
@@ -252,12 +251,10 @@
     <section class="onboarding">
       <h1>Memo</h1>
       <p>
-        Escolha uma pasta para ser o seu caderno. Se ela ainda não for um
-        caderno, o Memo cria a estrutura dentro dela — seus arquivos continuam
-        sendo `.md` comuns, legíveis em qualquer editor.
+        {S.onboardingIntro}
       </p>
       <button onclick={chooseFolder} disabled={busy}>
-        Escolher pasta do caderno…
+        {S.chooseFolder}
       </button>
       {#if error}<p class="error">{error}</p>{/if}
     </section>
@@ -266,17 +263,17 @@
       <nav>
         <div class="notebook" title={notebook.path}>
           <strong>{notebook.name}</strong>
-          {#if notebook.readOnly}<span class="ro">somente leitura</span>{/if}
+          {#if notebook.readOnly}<span class="ro">{S.readOnly}</span>{/if}
         </div>
 
         <button
           class:active={view.kind === "period" && view.period === "day"}
-          onclick={() => (view = { kind: "period", period: "day" })}>Hoje</button
+          onclick={() => (view = { kind: "period", period: "day" })}>{S.today}</button
         >
         <button
           class:active={view.kind === "period" && view.period === "week"}
           onclick={() => (view = { kind: "period", period: "week" })}
-          >Semana</button
+          >{S.week}</button
         >
 
         <hr />
@@ -294,18 +291,18 @@
         <hr />
         <button
           class:active={view.kind === "completed"}
-          onclick={() => (view = { kind: "completed" })}>Completas</button
+          onclick={() => (view = { kind: "completed" })}>{S.completed}</button
         >
 
         {#if !notebook.readOnly}
-          <button class="secondary" onclick={createList}>+ nova lista</button>
+          <button class="secondary" onclick={createList}>{S.newListButton}</button>
         {/if}
-        <button class="secondary" onclick={chooseFolder}>trocar caderno…</button>
+        <button class="secondary" onclick={chooseFolder}>{S.switchNotebook}</button>
       </nav>
 
       <section class="content">
         {#if error}
-          <p class="error">{error} <button onclick={() => (error = null)}>ok</button></p>
+          <p class="error">{error} <button onclick={() => (error = null)}>{S.dismissError}</button></p>
         {/if}
 
         {#if conflicts.length > 0}
@@ -313,11 +310,10 @@
                edited the same list and the sync tool kept both. -->
           <div class="conflict">
             <strong
-              >{conflicts.length} conflito(s) de sincronização neste caderno</strong
+              >{S.conflictsTitle(conflicts.length)}</strong
             >
             <p>
-              Outro dispositivo editou os mesmos arquivos. O Memo não escolhe
-              por você — abra a pasta e decida qual versão fica.
+              {S.conflictsBody}
             </p>
             <ul>
               {#each conflicts as conflict}
@@ -353,8 +349,8 @@
           />
           {#if !notebook.readOnly && view.list !== layout.inbox}
             <p class="list-actions">
-              <button onclick={renameCurrentList}>renomear lista</button>
-              <button onclick={deleteCurrentList}>apagar lista</button>
+              <button onclick={renameCurrentList}>{S.renameList}</button>
+              <button onclick={deleteCurrentList}>{S.deleteList}</button>
             </p>
           {/if}
         {:else}

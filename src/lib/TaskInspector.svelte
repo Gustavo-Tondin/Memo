@@ -15,6 +15,7 @@
   import { onDestroy } from "svelte";
   import { api } from "./api.js";
   import { ensureTaskId } from "./taskId.js";
+  import { S } from "./strings.js";
 
   let {
     task,
@@ -222,19 +223,19 @@
       checked={task?.done ?? false}
       disabled={readOnly}
       onchange={complete}
-      aria-label="concluir"
+      aria-label={S.complete}
     />
     <input
       class="title"
       bind:value={draft.text}
       disabled={readOnly}
-      aria-label="nome da tarefa"
+      aria-label={S.taskName}
     />
-    <button class="close" onclick={() => onClose?.()} aria-label="fechar">×</button>
+    <button class="close" onclick={() => onClose?.()} aria-label={S.closePanel}>×</button>
   </header>
 
   <section>
-    <h3>Subtarefas</h3>
+    <h3>{S.subtasksTitle}</h3>
     <ul>
       {#each draft.subtasks as subtask, i (i)}
         <li>
@@ -242,11 +243,11 @@
             type="checkbox"
             bind:checked={subtask.done}
             disabled={readOnly}
-            aria-label={`subtarefa: ${subtask.text}`}
+            aria-label={S.subtaskLabel(subtask.text)}
           />
           <input bind:value={subtask.text} disabled={readOnly} />
           {#if !readOnly}
-            <button onclick={() => removeSubtask(i)} aria-label="remover subtarefa"
+            <button onclick={() => removeSubtask(i)} aria-label={S.removeSubtask}
               >×</button
             >
           {/if}
@@ -255,19 +256,19 @@
     </ul>
     {#if !readOnly}
       <form onsubmit={(e) => (e.preventDefault(), addSubtask())}>
-        <input placeholder="Nova subtarefa…" bind:value={newSubtask} />
+        <input placeholder={S.newSubtaskPlaceholder} bind:value={newSubtask} />
       </form>
     {/if}
   </section>
 
   <section>
-    <h3>Tags</h3>
+    <h3>{S.tagsTitle}</h3>
     <div class="tags">
       {#each draft.tags as tag (tag)}
         <span class="tag">
           #{tag}
           {#if !readOnly}
-            <button onclick={() => removeTag(tag)} aria-label={`remover #${tag}`}
+            <button onclick={() => removeTag(tag)} aria-label={S.removeTag(tag)}
               >×</button
             >
           {/if}
@@ -276,20 +277,20 @@
     </div>
     {#if !readOnly}
       <form onsubmit={(e) => (e.preventDefault(), addTag())}>
-        <input placeholder="Nova tag…" bind:value={newTag} />
+        <input placeholder={S.newTagPlaceholder} bind:value={newTag} />
       </form>
     {/if}
   </section>
 
   <section>
-    <h3>Descrição</h3>
+    <h3>{S.descriptionTitle}</h3>
     <textarea bind:value={draft.description} disabled={readOnly} rows="4"
     ></textarea>
   </section>
 
   <section class="fields">
     <label>
-      Data
+      {S.dueDateLabel}
       <span class="date">
         <!-- `onchange`, not `bind:value`: a date field emits `input` for every
              half-typed value while the picker is open, so binding it would
@@ -303,7 +304,7 @@
           disabled={readOnly}
         />
         {#if !readOnly && draft.due}
-          <button onclick={clearDate} aria-label="limpar data" title="limpar"
+          <button onclick={clearDate} aria-label={S.clearDate} title={S.clearDateHint}
             >×</button
           >
         {/if}
@@ -311,30 +312,30 @@
     </label>
 
     <label>
-      Prioridade
+      {S.priorityLabel}
       <select bind:value={draft.priority} disabled={readOnly}>
-        <option value={0}>nenhuma</option>
-        <option value={1}>!1 alta</option>
-        <option value={2}>!2 média</option>
-        <option value={3}>!3 baixa</option>
+        <option value={0}>{S.priorityNone}</option>
+        <option value={1}>{S.priorityHigh}</option>
+        <option value={2}>{S.priorityMedium}</option>
+        <option value={3}>{S.priorityLow}</option>
       </select>
     </label>
 
     <label>
-      Repetir
+      {S.repeatLabel}
       <span class="repeat">
         <input
           type="number"
           min="1"
           bind:value={draft.repeatEvery}
           disabled={readOnly || !draft.repeatUnit}
-          aria-label="a cada"
+          aria-label={S.repeatEvery}
         />
         <select bind:value={draft.repeatUnit} disabled={readOnly}>
-          <option value="">não repete</option>
-          <option value="day">dia(s)</option>
-          <option value="week">semana(s)</option>
-          <option value="month">mês(es)</option>
+          <option value="">{S.noRepeat}</option>
+          <option value="day">{S.repeatDays}</option>
+          <option value="week">{S.repeatWeeks}</option>
+          <option value="month">{S.repeatMonths}</option>
         </select>
       </span>
     </label>

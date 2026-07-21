@@ -3,6 +3,7 @@
   import { api } from "./api.js";
   import { ensureTaskId } from "./taskId.js";
   import { listName } from "./paths.js";
+  import { S } from "./strings.js";
   import TaskRow from "./TaskRow.svelte";
 
   let {
@@ -70,7 +71,7 @@
 <h2>{listName(list)}</h2>
 
 {#if tasks.length === 0}
-  <p class="empty">Nenhuma tarefa nesta lista.</p>
+  <p class="empty">{S.emptyList}</p>
 {:else}
   <ul>
     <!-- Keyed by position as well as id: a duplicated id would otherwise be a
@@ -85,8 +86,8 @@
         onComplete={complete}
         onEdit={edit}
       >
-        <button onclick={() => pull("day", task)}>→ Hoje</button>
-        <button onclick={() => pull("week", task)}>→ Semana</button>
+        <button onclick={() => pull("day", task)}>{S.pullToToday}</button>
+        <button onclick={() => pull("week", task)}>{S.pullToWeek}</button>
       </TaskRow>
     {/each}
   </ul>
@@ -96,8 +97,8 @@
      already there, and a field on top pushes the list down every render. -->
 {#if !readOnly}
   <form onsubmit={(e) => (e.preventDefault(), add())}>
-    <input placeholder="Nova tarefa…" bind:value={newText} />
-    <button type="submit">Adicionar</button>
+    <input placeholder={S.newTaskPlaceholder} bind:value={newText} />
+    <button type="submit">{S.addTask}</button>
   </form>
 {/if}
 
