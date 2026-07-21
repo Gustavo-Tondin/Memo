@@ -12,6 +12,11 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const invoke = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args) => invoke(...args) }));
+// The note editor's engine is CodeMirror, which needs a real layout jsdom
+// cannot give it. These tests are about the *editor screen* — auto-save,
+// flush on close, read-only — so the engine is stubbed by a textarea and the
+// live-preview rule is tested on its own in `markdown.test.js`.
+vi.mock("./Editor.svelte", async () => await import("./EditorStub.svelte"));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
 
 const { default: ListView } = await import("./ListView.svelte");

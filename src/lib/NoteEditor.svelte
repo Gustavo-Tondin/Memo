@@ -9,6 +9,7 @@
   import { onDestroy } from "svelte";
   import { api } from "./api.js";
   import { S } from "./strings.js";
+  import Editor from "./Editor.svelte";
 
   let {
     folder,
@@ -136,12 +137,14 @@
   {/if}
 </header>
 
-<textarea
-  bind:value={body}
-  disabled={readOnly || loading}
-  placeholder={S.noteBodyPlaceholder}
-  aria-label={S.noteBodyPlaceholder}
-></textarea>
+<div class="body" aria-label={S.noteBodyPlaceholder}>
+  <Editor
+    value={body}
+    readOnly={readOnly || loading}
+    placeholder={S.noteBodyPlaceholder}
+    onChange={(next) => (body = next)}
+  />
+</div>
 
 <style>
   header {
@@ -162,11 +165,7 @@
     color: #555;
     padding: 0;
   }
-  textarea {
-    width: 100%;
+  .body {
     min-height: 60vh;
-    font: inherit;
-    line-height: 1.5;
-    resize: vertical;
   }
 </style>
