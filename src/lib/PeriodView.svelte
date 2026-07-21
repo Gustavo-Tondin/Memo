@@ -3,9 +3,19 @@
   // could be pulled. Neither stores content — a task created here is written
   // to the Inbox by the core.
   import { api } from "./api.js";
+  import { ensureTaskId } from "./taskId.js";
   import TaskRow from "./TaskRow.svelte";
 
-  let { period, clock, readOnly, onChanged, onError, reloadKey } = $props();
+  let {
+    period,
+    clock,
+    readOnly,
+    onChanged,
+    onError,
+    reloadKey,
+    onSelect,
+    selectedId = null,
+  } = $props();
 
   let pulled = $state([]);
   let suggestions = $state([]);
@@ -53,13 +63,7 @@
   // needs to be addressed, and pulling it into a period is exactly that.
   const pull = (list, task) =>
     act(async () => {
-      let id = task.id;
-      if (!id) {
-        const tasks = await api.listTasks(list);
-        const position = tasks.findIndex((t) => t.text === task.text && !t.id);
-        if (position < 0) throw { kind: "taskNotFound", message: task.text };
-        id = await api.ensureTaskId(list, position);
-      }
+      const id = await ensureTaskId(list, task);
       await api.pullInto(period, list, id);
     });
 
@@ -101,6 +105,8 @@
         task={entry.task}
         list={entry.list}
         showList
+        {onSelect}
+        selected={!!entry.task.id && entry.task.id === selectedId}
         onComplete={complete}
         onEdit={edit}
       >
@@ -121,7 +127,11 @@
         <ul>
           {#each group.items as entry, i (`${entry.list}/${entry.task.id ?? ""}#${i}`)}
             <li>
-              <span>{entry.task.text}</span>
+              <button
+                class="text"
+                onclick={() => onSelect?.(entry.list, entry.task)}
+                title="clique para abrir">{entry.task.text}</button
+              >
               {#if entry.task.due}<small class="due">{entry.task.due}</small>{/if}
               <small class="from">{entry.list}</small>
               <button onclick={() => pull(entry.list, entry.task)}>puxar</button>
@@ -146,6 +156,14 @@
   }
   small {
     color: #666;
+  }
+  .text {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
   }
   .empty {
     color: #666;

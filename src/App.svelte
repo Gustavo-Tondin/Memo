@@ -6,8 +6,8 @@
   import ListView from "./lib/ListView.svelte";
   import PeriodView from "./lib/PeriodView.svelte";
   import CompletedView from "./lib/CompletedView.svelte";
-
-  const COMPLETED = "Completas";
+  import TaskInspector from "./lib/TaskInspector.svelte";
+  import { COMPLETED_LIST, INBOX_LIST } from "./lib/names.js";
 
   let notebook = $state(null);
   let clock = $state(null);
@@ -18,6 +18,10 @@
   let reloadKey = $state(0);
   let counts = $state({});
   let conflicts = $state([]);
+  /// The task open in the right-hand panel, as `{ list, task }`.
+  let selected = $state(null);
+
+  const select = (list, task) => (selected = { list, task });
 
   /// A screen as a string, so the shell can store it without knowing what a
   /// screen is. Same strings go back through `restoreView`.
@@ -37,13 +41,17 @@
 
   // Records where the user is. The shell ignores this when the notebook has
   // the preference off, so no check is needed here.
+  //
+  // Changing screen also closes the inspector: the panel would otherwise keep
+  // showing a task from a list that is no longer on screen.
   $effect(() => {
     const id = viewToId(view);
+    selected = null;
     if (notebook) api.rememberScreen(id).catch(() => {});
   });
 
   let userLists = $derived(
-    (notebook?.lists ?? []).filter((name) => name !== COMPLETED),
+    (notebook?.lists ?? []).filter((name) => name !== COMPLETED_LIST),
   );
 
   function fail(e) {
@@ -129,7 +137,7 @@
     try {
       const rescued = await api.deleteList(list);
       await refreshNotebook();
-      view = { kind: "list", list: "Inbox" };
+      view = { kind: "list", list: INBOX_LIST };
       reload();
       if (rescued > 0) {
         error = `${rescued} tarefa(s) de "${list}" foram movidas para a Inbox.`;
@@ -202,7 +210,7 @@
       {#if error}<p class="error">{error}</p>{/if}
     </section>
   {:else}
-    <div class="app">
+    <div class="app" class:with-panel={selected}>
       <nav>
         <div class="notebook" title={notebook.path}>
           <strong>{notebook.name}</strong>
@@ -277,6 +285,8 @@
             onChanged={refreshNotebook}
             onError={fail}
             {reloadKey}
+            onSelect={select}
+            selectedId={selected?.task?.id ?? null}
           />
         {:else if view.kind === "list"}
           <ListView
@@ -285,8 +295,10 @@
             onChanged={refreshNotebook}
             onError={fail}
             {reloadKey}
+            onSelect={select}
+            selectedId={selected?.task?.id ?? null}
           />
-          {#if !notebook.readOnly && view.list !== "Inbox"}
+          {#if !notebook.readOnly && view.list !== INBOX_LIST}
             <p class="list-actions">
               <button onclick={renameCurrentList}>renomear lista</button>
               <button onclick={deleteCurrentList}>apagar lista</button>
@@ -301,6 +313,22 @@
           />
         {/if}
       </section>
+
+      <!-- The third pane only exists while a task is open. Phase 8.5 turns
+           this into the permanent inspector of the wireframe. -->
+      {#if selected}
+        <TaskInspector
+          task={selected.task}
+          list={selected.list}
+          readOnly={notebook.readOnly}
+          onSaved={() => {
+            refreshNotebook();
+            reload();
+          }}
+          onError={fail}
+          onClose={() => (selected = null)}
+        />
+      {/if}
     </div>
   {/if}
 </main>
@@ -320,6 +348,12 @@
     display: grid;
     grid-template-columns: 14rem 1fr;
     height: 100%;
+    min-height: 0;
+  }
+  /* Driven by a class, not `:has(aside)`: the panel is a child component and
+     Svelte's scoped CSS would never match its element from here. */
+  .app.with-panel {
+    grid-template-columns: 14rem 1fr 20rem;
   }
   nav {
     display: flex;

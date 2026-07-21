@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use memo_core::{Notebook, OriginAction, Task, TaskList};
+use memo_core::{Notebook, OriginAction, Task};
 
 fn read(path: impl AsRef<Path>) -> String {
     std::fs::read_to_string(path).unwrap()

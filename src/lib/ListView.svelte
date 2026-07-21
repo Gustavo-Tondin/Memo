@@ -1,9 +1,18 @@
 <script>
   // A single task list (Inbox, Compras, …).
   import { api } from "./api.js";
+  import { ensureTaskId } from "./taskId.js";
   import TaskRow from "./TaskRow.svelte";
 
-  let { list, readOnly, onChanged, onError, reloadKey } = $props();
+  let {
+    list,
+    readOnly,
+    onChanged,
+    onError,
+    reloadKey,
+    onSelect,
+    selectedId = null,
+  } = $props();
 
   let tasks = $state([]);
   let newText = $state("");
@@ -42,7 +51,14 @@
 
   const complete = (l, id) => act(() => api.completeTask(l, id));
   const edit = (l, id, text) => act(() => api.editTaskText(l, id, text));
-  const pull = (period, id) => act(() => api.pullInto(period, list, id));
+
+  // A task written by hand in another editor has no id yet, and pulling it
+  // into a period is exactly the kind of thing that earns one.
+  const pull = (period, task) =>
+    act(async () => {
+      const id = await ensureTaskId(list, task);
+      await api.pullInto(period, list, id);
+    });
 </script>
 
 <h2>{list}</h2>
@@ -62,9 +78,16 @@
          duplicate key, and Svelte aborts rendering the whole list. A read-only
          notebook never gets its ids de-duplicated, so this can still happen. -->
     {#each tasks as task, i (`${task.id ?? ""}#${i}`)}
-      <TaskRow {task} {list} onComplete={complete} onEdit={edit}>
-        <button onclick={() => pull("day", task.id)}>→ Hoje</button>
-        <button onclick={() => pull("week", task.id)}>→ Semana</button>
+      <TaskRow
+        {task}
+        {list}
+        {onSelect}
+        selected={!!task.id && task.id === selectedId}
+        onComplete={complete}
+        onEdit={edit}
+      >
+        <button onclick={() => pull("day", task)}>→ Hoje</button>
+        <button onclick={() => pull("week", task)}>→ Semana</button>
       </TaskRow>
     {/each}
   </ul>

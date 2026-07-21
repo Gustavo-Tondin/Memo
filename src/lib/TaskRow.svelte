@@ -1,7 +1,20 @@
 <script>
   // One task line. Knows how to render and edit itself; every action is a
   // callback, so the screen above decides what completing means.
-  let { task, list, showList = false, onComplete, onEdit, children } = $props();
+  //
+  // Two gestures on the text, on purpose: a single click opens the task in the
+  // inspector (where the fields live), a double click renames it in place. The
+  // rename is the one edit frequent enough to deserve staying on the row.
+  let {
+    task,
+    list,
+    showList = false,
+    selected = false,
+    onComplete,
+    onEdit,
+    onSelect,
+    children,
+  } = $props();
 
   let editing = $state(false);
   // Filled when editing starts; initialising from `task` here would only ever
@@ -36,7 +49,7 @@
   }
 </script>
 
-<li>
+<li class:selected>
   <input
     type="checkbox"
     checked={task.done}
@@ -54,7 +67,12 @@
       autofocus
     />
   {:else}
-    <button class="text" onclick={startEditing} title="clique para editar">
+    <button
+      class="text"
+      onclick={() => onSelect?.(list, task)}
+      ondblclick={startEditing}
+      title="clique para abrir, duplo clique para renomear"
+    >
       {task.text}
     </button>
   {/if}
@@ -84,13 +102,17 @@
     gap: 0.5rem;
     padding: 0.15rem 0;
   }
+  li.selected {
+    background: #eef2ff;
+    border-radius: 4px;
+  }
   .text {
     background: none;
     border: none;
     padding: 0;
     font: inherit;
     text-align: left;
-    cursor: text;
+    cursor: pointer;
     flex: 1;
   }
   .list {

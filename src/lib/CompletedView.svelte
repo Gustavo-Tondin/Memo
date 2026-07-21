@@ -2,6 +2,7 @@
   // Completed tasks. Unchecking one sends it back to the list it came from —
   // the core reads that from the `origin` recorded in the file.
   import { api } from "./api.js";
+  import { COMPLETED_LIST } from "./names.js";
 
   let { readOnly, onChanged, onError, reloadKey } = $props();
 
@@ -14,7 +15,9 @@
 
   async function load() {
     try {
-      tasks = await api.listTasks("Completas");
+      // The list is named in English on disk since phase 5; the label the user
+      // reads is a separate thing and stays translated.
+      tasks = await api.listTasks(COMPLETED_LIST);
     } catch (e) {
       onError(e);
     }

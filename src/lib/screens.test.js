@@ -17,6 +17,7 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(()
 const { default: ListView } = await import("./ListView.svelte");
 const { default: PeriodView } = await import("./PeriodView.svelte");
 const { default: CompletedView } = await import("./CompletedView.svelte");
+const { default: TaskInspector } = await import("./TaskInspector.svelte");
 
 const task = (id, text, extra = {}) => ({
   id,
@@ -120,6 +121,50 @@ describe("ListView", () => {
     await waitFor(() =>
       expect(screen.getAllByText("Comprar leite").length).toBe(2),
     );
+  });
+
+  test("pulling a task with no id gives it one first", async () => {
+    // Written by hand in another editor: there is nothing to reference in the
+    // day state until the core hands out an id.
+    bridge({
+      list_tasks: [task(null, "Escrita à mão")],
+      ensure_task_id: "new1",
+      pull_into_period: true,
+    });
+
+    render(ListView, {
+      props: { list: "Compras", readOnly: false, onChanged: noop, onError: noop, reloadKey: 0 },
+    });
+
+    await userEvent.click(await screen.findByText("→ Hoje"));
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("pull_into_period", {
+        period: "day",
+        list: "Compras",
+        id: "new1",
+      }),
+    );
+  });
+
+  test("clicking a task opens it instead of renaming it", async () => {
+    bridge({ list_tasks: [task("a1", "Comprar leite")] });
+    const opened = [];
+
+    render(ListView, {
+      props: {
+        list: "Compras",
+        readOnly: false,
+        onChanged: noop,
+        onError: noop,
+        reloadKey: 0,
+        onSelect: (list, t) => opened.push([list, t.id]),
+      },
+    });
+
+    await userEvent.click(await screen.findByText("Comprar leite"));
+
+    expect(opened).toEqual([["Compras", "a1"]]);
   });
 
   test("a read-only notebook offers no way to add tasks", async () => {
@@ -241,7 +286,11 @@ describe("PeriodView", () => {
   });
 
   test("the week screen asks for week data", async () => {
-    bridge({ period_tasks: [], period_suggestions: [] });
+    // `grouped_suggestions`, not `period_suggestions`: mocking the command the
+    // screen stopped calling in phase 6 left `suggestions` null and threw
+    // while rendering, which vitest reported as an unhandled error instead of
+    // a failing test.
+    bridge({ period_tasks: [], grouped_suggestions: [] });
 
     render(PeriodView, { props: { ...props, period: "week" } });
 
@@ -279,5 +328,207 @@ describe("CompletedView", () => {
 
     await screen.findByText("Escrita à mão");
     expect(screen.getByLabelText("desmarcar").disabled).toBe(true);
+  });
+
+  test("reads the list by the name the core actually writes", async () => {
+    // The core renamed this list to English in phase 5 and this screen kept
+    // asking for "Completas". A missing file reads as empty, so the screen
+    // showed "nothing completed yet" forever instead of failing.
+    bridge({ list_tasks: [] });
+
+    render(CompletedView, {
+      props: { readOnly: false, onChanged: noop, onError: noop, reloadKey: 0 },
+    });
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("list_tasks", { list: "Completed" }),
+    );
+  });
+});
+
+describe("TaskInspector", () => {
+  const props = (task, extra = {}) => ({
+    task,
+    list: "Compras",
+    readOnly: false,
+    onSaved: noop,
+    onError: noop,
+    onClose: noop,
+    ...extra,
+  });
+
+  /// The arguments of the single `set_task_fields` call.
+  const savedFields = () =>
+    invoke.mock.calls.find(([cmd]) => cmd === "set_task_fields")[1].fields;
+
+  test("opening a task without an id does not write anything", async () => {
+    // The whole point of the lazy id: looking at a task must leave the `.md`
+    // untouched. Assigning on open would make every click a file write.
+    bridge({ ensure_task_id: "new1", set_task_fields: null });
+
+    render(TaskInspector, { props: props(task(null, "Escrita à mão")) });
+
+    await screen.findByDisplayValue("Escrita à mão");
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  test("saving a task without an id gives it one first", async () => {
+    bridge({
+      list_tasks: [task(null, "Escrita à mão")],
+      ensure_task_id: "new1",
+      set_task_fields: null,
+    });
+
+    render(TaskInspector, { props: props(task(null, "Escrita à mão")) });
+    await userEvent.click(await screen.findByText("Salvar"));
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("ensure_task_id", {
+        list: "Compras",
+        position: 0,
+      }),
+    );
+    const call = invoke.mock.calls.find(([cmd]) => cmd === "set_task_fields");
+    expect(call[1].id).toBe("new1");
+  });
+
+  test("saving twice does not ask for a second id", async () => {
+    // The screen above still holds the id-less copy it selected. Looking the
+    // position up again would find nothing — the task has an id by now — and
+    // the second save would fail with taskNotFound.
+    bridge({
+      list_tasks: [task(null, "Escrita à mão")],
+      ensure_task_id: "new1",
+      set_task_fields: null,
+    });
+
+    render(TaskInspector, { props: props(task(null, "Escrita à mão")) });
+
+    const save = await screen.findByText("Salvar");
+    await userEvent.click(save);
+    await waitFor(() =>
+      expect(invoke.mock.calls.some(([cmd]) => cmd === "set_task_fields")).toBe(true),
+    );
+    await userEvent.click(save);
+
+    await waitFor(() =>
+      expect(invoke.mock.calls.filter(([cmd]) => cmd === "set_task_fields").length).toBe(2),
+    );
+    expect(invoke.mock.calls.filter(([cmd]) => cmd === "ensure_task_id").length).toBe(1);
+  });
+
+  test("an existing id is used as is", async () => {
+    bridge({ set_task_fields: null });
+
+    render(TaskInspector, { props: props(task("a1", "Comprar leite")) });
+    await userEvent.click(await screen.findByText("Salvar"));
+
+    await waitFor(() =>
+      expect(invoke.mock.calls.some(([cmd]) => cmd === "set_task_fields")).toBe(true),
+    );
+    expect(invoke.mock.calls.some(([cmd]) => cmd === "ensure_task_id")).toBe(false);
+  });
+
+  test("clearing the date sends null, not nothing", async () => {
+    // Absent means "leave alone" on the Rust side, so an emptied field has to
+    // travel as an explicit null or the date could never be removed.
+    bridge({ set_task_fields: null });
+
+    render(TaskInspector, {
+      props: props(task("a1", "Comprar leite", { due: "2026-07-25" })),
+    });
+
+    await userEvent.clear(await screen.findByLabelText("Data"));
+    await userEvent.click(screen.getByText("Salvar"));
+
+    await waitFor(() => expect(savedFields().due).toBe(null));
+  });
+
+  test("a tag with spaces is stored as a single token", async () => {
+    // A loose word on the metadata line stops it from being all-tokens, and
+    // the next read turns the whole line into a description — losing the
+    // date, the priority and the other tags with it.
+    bridge({ set_task_fields: null });
+
+    render(TaskInspector, { props: props(task("a1", "Comprar leite")) });
+
+    await userEvent.type(await screen.findByPlaceholderText("Nova tag…"), "casa nova{enter}");
+    await userEvent.click(screen.getByText("Salvar"));
+
+    await waitFor(() => expect(savedFields().tags).toEqual(["casa-nova"]));
+  });
+
+  test("repeat travels in the written form, never as an object", async () => {
+    // The bridge hands back { every, unit } but only parses `every-2-weeks`.
+    bridge({ set_task_fields: null });
+
+    render(TaskInspector, {
+      props: props(task("a1", "Regar plantas", { repeat: { every: 2, unit: "week" } })),
+    });
+
+    await userEvent.click(await screen.findByText("Salvar"));
+
+    await waitFor(() => expect(savedFields().repeat).toBe("every-2-weeks"));
+  });
+
+  test("a single repetition drops the count", async () => {
+    bridge({ set_task_fields: null });
+
+    render(TaskInspector, {
+      props: props(task("a1", "Regar plantas", { repeat: { every: 1, unit: "day" } })),
+    });
+
+    await userEvent.click(await screen.findByText("Salvar"));
+
+    await waitFor(() => expect(savedFields().repeat).toBe("every-day"));
+  });
+
+  test("subtasks survive the round trip", async () => {
+    bridge({ set_task_fields: null });
+
+    render(TaskInspector, {
+      props: props(
+        task("a1", "Obra", { subtasks: [{ text: "Cimento", done: true }] }),
+      ),
+    });
+
+    await userEvent.type(
+      await screen.findByPlaceholderText("Nova subtarefa…"),
+      "Areia{enter}",
+    );
+    await userEvent.click(screen.getByText("Salvar"));
+
+    await waitFor(() =>
+      expect(savedFields().subtasks).toEqual([
+        { text: "Cimento", done: true },
+        { text: "Areia", done: false },
+      ]),
+    );
+  });
+
+  test("a read-only notebook offers no way to save", async () => {
+    bridge({});
+
+    render(TaskInspector, {
+      props: props(task("a1", "Comprar leite"), { readOnly: true }),
+    });
+
+    await screen.findByDisplayValue("Comprar leite");
+    expect(screen.queryByText("Salvar")).toBeNull();
+    expect(screen.queryByPlaceholderText("Nova tag…")).toBeNull();
+  });
+
+  test("selecting another task replaces the draft", async () => {
+    bridge({ set_task_fields: null });
+
+    const { rerender } = render(TaskInspector, {
+      props: props(task("a1", "Comprar leite")),
+    });
+    await screen.findByDisplayValue("Comprar leite");
+
+    await rerender(props(task("b2", "Pagar boleto")));
+
+    expect(await screen.findByDisplayValue("Pagar boleto")).toBeTruthy();
+    expect(screen.queryByDisplayValue("Comprar leite")).toBeNull();
   });
 });
