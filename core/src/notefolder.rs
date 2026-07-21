@@ -1,0 +1,323 @@
+//! A folder of notes — what a `notes` widget owns.
+//!
+//! The counterpart of [`crate::folder::TaskFolder`], and deliberately not a
+//! generalisation of it: notes are whole documents in a free folder tree,
+//! lists are lines with state in a flat folder. Sharing a type would be the
+//! wrong abstraction (spec 5 — separate worlds); sharing the *infrastructure*
+//! — atomic writes, safe paths, the watcher — is the right one.
+
+use std::path::{Path, PathBuf};
+
+use chrono::NaiveDate;
+
+use crate::error::{Error, IoContext, Result};
+use crate::note::Note;
+use crate::relpath;
+
+/// Default folder for loose notes (spec 5).
+pub const NOTES_INBOX: &str = "Inbox";
+
+const EXTENSION: &str = "md";
+
+/// A note as a listing shows it: address, title, and enough to draw a card.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteEntry {
+    /// Address relative to the widget folder (`Ideias/receita.md`).
+    pub path: String,
+    /// The file stem — notes are titled by their file name, like lists.
+    pub title: String,
+    /// Folder holding it, relative to the widget (`""` at the root).
+    pub folder: String,
+    pub preview: String,
+    pub created: Option<NaiveDate>,
+    pub pinned: bool,
+}
+
+/// A directory holding notes and folders of notes. Cheap to build: it is a
+/// path, not a cache — every method reads the disk.
+#[derive(Debug, Clone)]
+pub struct NoteFolder {
+    dir: PathBuf,
+}
+
+impl NoteFolder {
+    pub fn new(dir: impl Into<PathBuf>) -> Self {
+        Self { dir: dir.into() }
+    }
+
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
+    /// Resolves a note address relative to this folder.
+    pub fn note_path(&self, relative: &str) -> Result<PathBuf> {
+        let invalid = || Error::InvalidNotePath(relative.to_string());
+        if !relative.ends_with(&format!(".{EXTENSION}")) {
+            return Err(invalid());
+        }
+        relpath::safe_join(&self.dir, relative).ok_or_else(invalid)
+    }
+
+    /// Resolves a folder address relative to this folder. `""` is the root.
+    pub fn folder_path(&self, relative: &str) -> Result<PathBuf> {
+        if relative.is_empty() {
+            return Ok(self.dir.clone());
+        }
+        relpath::safe_join(&self.dir, relative)
+            .ok_or_else(|| Error::InvalidNotePath(relative.to_string()))
+    }
+
+    /// Recreates the default `Inbox` folder when missing, the same courtesy
+    /// `Inbox.md` gets on the tasks side.
+    pub fn ensure_default_folders(&self) -> Result<()> {
+        let inbox = self.dir.join(NOTES_INBOX);
+        std::fs::create_dir_all(&inbox).ctx(&inbox)?;
+        Ok(())
+    }
+
+    /// Every folder in the subtree, relative to this one, alphabetically.
+    pub fn folders(&self) -> Result<Vec<String>> {
+        let mut found = Vec::new();
+        self.walk(&self.dir, &mut |path, relative| {
+            if path.is_dir() {
+                found.push(relative.to_string());
+            }
+            Ok(())
+        })?;
+        found.sort();
+        Ok(found)
+    }
+
+    /// Every note in the subtree, ready to list.
+    ///
+    /// Sorted the way a board reads: pinned first, then newest, then by
+    /// title. Reading **never writes** — a folder browsed is a folder
+    /// untouched, which is why `created` is adopted on save and not here.
+    pub fn notes(&self) -> Result<Vec<NoteEntry>> {
+        let mut found: Vec<NoteEntry> = Vec::new();
+        self.walk(&self.dir, &mut |path, relative| {
+            if !is_note_file(path) {
+                return Ok(());
+            }
+            let text = std::fs::read_to_string(path).ctx(path)?;
+            let note = Note::parse(&text);
+            let (folder, title) = split_relative(relative);
+            found.push(NoteEntry {
+                path: relative.to_string(),
+                title,
+                folder,
+                preview: note.preview(),
+                created: note.created,
+                pinned: note.pinned,
+            });
+            Ok(())
+        })?;
+
+        found.sort_by(|a, b| {
+            b.pinned
+                .cmp(&a.pinned)
+                .then_with(|| b.created.cmp(&a.created))
+                .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+        });
+        Ok(found)
+    }
+
+    /// Notes whose title or text matches `query`. An empty query is every
+    /// note, so the search box starts showing everything.
+    pub fn search(&self, query: &str) -> Result<Vec<NoteEntry>> {
+        let needle = query.trim().to_lowercase();
+        if needle.is_empty() {
+            return self.notes();
+        }
+
+        let mut found = Vec::new();
+        for entry in self.notes()? {
+            if entry.title.to_lowercase().contains(&needle) {
+                found.push(entry);
+                continue;
+            }
+            // Only now pay for reading the body.
+            let note = self.read(&entry.path)?;
+            if note.matches(&needle) {
+                found.push(entry);
+            }
+        }
+        Ok(found)
+    }
+
+    pub fn read(&self, relative: &str) -> Result<Note> {
+        let path = self.note_path(relative)?;
+        let text = std::fs::read_to_string(&path).ctx(&path)?;
+        Ok(Note::parse(&text))
+    }
+
+    /// Replaces a note's body, adopting `today` as its creation date if it
+    /// does not have one yet — the lazy frontmatter's one writing moment.
+    pub fn write(&self, relative: &str, body: &str, today: NaiveDate) -> Result<()> {
+        let path = self.note_path(relative)?;
+        let mut note = match std::fs::read_to_string(&path) {
+            Ok(text) => Note::parse(&text),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Note::default(),
+            Err(e) => return Err(Error::Io { path, source: e }),
+        };
+        note.body = body.to_string();
+        note.adopt_created(today);
+        crate::fsio::write_atomically(&path, note.render().as_bytes())
+    }
+
+    /// Creates a note in `folder`, returning its address.
+    ///
+    /// A title that collides gets a numeric suffix rather than overwriting
+    /// what is there — losing a note to a name clash would be silent.
+    pub fn create(&self, folder: &str, title: &str, today: NaiveDate) -> Result<String> {
+        let title = sanitize_title(title)?;
+        let dir = self.folder_path(folder)?;
+        std::fs::create_dir_all(&dir).ctx(&dir)?;
+
+        let mut name = title.clone();
+        let mut attempt = 2;
+        while dir.join(format!("{name}.{EXTENSION}")).exists() {
+            name = format!("{title} {attempt}");
+            attempt += 1;
+        }
+
+        let relative = join_relative(folder, &format!("{name}.{EXTENSION}"));
+        let mut note = Note::default();
+        note.adopt_created(today);
+        crate::fsio::write_atomically(&self.note_path(&relative)?, note.render().as_bytes())?;
+        Ok(relative)
+    }
+
+    pub fn delete(&self, relative: &str) -> Result<()> {
+        let path = self.note_path(relative)?;
+        std::fs::remove_file(&path).ctx(&path)
+    }
+
+    /// Renames a note inside its folder, returning the new address.
+    pub fn rename(&self, relative: &str, title: &str) -> Result<String> {
+        let title = sanitize_title(title)?;
+        let source = self.note_path(relative)?;
+        let (folder, _) = split_relative(relative);
+        let target_relative = join_relative(&folder, &format!("{title}.{EXTENSION}"));
+        let target = self.note_path(&target_relative)?;
+
+        if target == source {
+            return Ok(target_relative);
+        }
+        if target.exists() {
+            return Err(Error::InvalidNotePath(format!("{title} already exists")));
+        }
+        std::fs::rename(&source, &target).ctx(&target)?;
+        Ok(target_relative)
+    }
+
+    /// Moves a note to another folder, returning the new address.
+    pub fn move_to(&self, relative: &str, folder: &str) -> Result<String> {
+        let source = self.note_path(relative)?;
+        let (_, title) = split_relative(relative);
+        let dir = self.folder_path(folder)?;
+        std::fs::create_dir_all(&dir).ctx(&dir)?;
+
+        let target_relative = join_relative(folder, &format!("{title}.{EXTENSION}"));
+        let target = self.note_path(&target_relative)?;
+        if target == source {
+            return Ok(target_relative);
+        }
+        if target.exists() {
+            return Err(Error::InvalidNotePath(format!(
+                "{title} already exists in {folder}"
+            )));
+        }
+        std::fs::rename(&source, &target).ctx(&target)?;
+        Ok(target_relative)
+    }
+
+    pub fn set_pinned(&self, relative: &str, pinned: bool) -> Result<()> {
+        let path = self.note_path(relative)?;
+        let text = std::fs::read_to_string(&path).ctx(&path)?;
+        let mut note = Note::parse(&text);
+        note.pinned = pinned;
+        crate::fsio::write_atomically(&path, note.render().as_bytes())
+    }
+
+    pub fn create_folder(&self, relative: &str) -> Result<()> {
+        let path = self.folder_path(relative)?;
+        std::fs::create_dir_all(&path).ctx(&path)?;
+        Ok(())
+    }
+
+    /// Walks the subtree, skipping hidden entries and sync conflicts.
+    fn walk(
+        &self,
+        dir: &Path,
+        visit: &mut impl FnMut(&Path, &str) -> Result<()>,
+    ) -> Result<()> {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => {
+                return Err(Error::Io {
+                    path: dir.to_path_buf(),
+                    source: e,
+                })
+            }
+        };
+
+        for entry in entries {
+            let path = entry.ctx(dir)?.path();
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            // A hidden entry is the app's or another tool's business, and a
+            // conflicting copy is not a note the user wrote.
+            if name.starts_with('.') || crate::conflict::is_conflict_file(&path) {
+                continue;
+            }
+
+            let relative = path
+                .strip_prefix(&self.dir)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            visit(&path, &relative)?;
+            if path.is_dir() {
+                self.walk(&path, visit)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+fn is_note_file(path: &Path) -> bool {
+    path.is_file() && path.extension().is_some_and(|ext| ext == EXTENSION)
+}
+
+/// Splits a note address into folder and title: `Ideias/receita.md` →
+/// (`Ideias`, `receita`).
+fn split_relative(relative: &str) -> (String, String) {
+    let stem = relative.strip_suffix(".md").unwrap_or(relative);
+    match stem.rsplit_once('/') {
+        Some((folder, title)) => (folder.to_string(), title.to_string()),
+        None => (String::new(), stem.to_string()),
+    }
+}
+
+fn join_relative(folder: &str, name: &str) -> String {
+    if folder.is_empty() {
+        name.to_string()
+    } else {
+        format!("{folder}/{name}")
+    }
+}
+
+/// A title becomes a file name, so it has to survive being one.
+fn sanitize_title(title: &str) -> Result<String> {
+    let cleaned = title.trim().replace(['/', '\\', '\0'], "-");
+    let cleaned = cleaned.trim().trim_start_matches('.').trim().to_string();
+    if cleaned.is_empty() {
+        return Err(Error::InvalidNotePath(title.to_string()));
+    }
+    Ok(cleaned)
+}

@@ -270,16 +270,9 @@ impl Workspace {
             return Ok(Some(self.root.clone()));
         }
 
-        let invalid = folder.trim().is_empty()
-            || folder.starts_with('/')
-            || folder.contains(['\\', '\0', '"'])
-            || folder
-                .split('/')
-                .any(|part| part.trim().is_empty() || part.starts_with('.'));
-        if invalid {
-            return Err(Error::InvalidWidgetFolder(folder.to_string()));
-        }
-        Ok(Some(self.root.join(folder)))
+        crate::relpath::safe_join(&self.root, folder)
+            .map(Some)
+            .ok_or_else(|| Error::InvalidWidgetFolder(folder.to_string()))
     }
 }
 

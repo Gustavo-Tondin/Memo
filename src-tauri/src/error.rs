@@ -43,6 +43,7 @@ impl From<memo_core::Error> for CommandError {
             Error::TaskNotFound(_) => "taskNotFound",
             Error::InvalidListName(_) => "invalidListName",
             Error::InvalidWidgetFolder(_) => "invalidWidgetFolder",
+            Error::InvalidNotePath(_) => "invalidNotePath",
             Error::ReadOnlyNotebook { .. } => "readOnlyNotebook",
             Error::ProtectedList(_) => "protectedList",
             Error::Watch(_) => "watch",

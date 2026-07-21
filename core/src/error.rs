@@ -31,6 +31,11 @@ pub enum Error {
     #[error("invalid widget folder {0:?}")]
     InvalidWidgetFolder(String),
 
+    /// A note address that could escape its folder, or a title that cannot
+    /// be a file name.
+    #[error("invalid note path {0:?}")]
+    InvalidNotePath(String),
+
     #[error("{0} already contains a Memo notebook")]
     AlreadyANotebook(PathBuf),
 

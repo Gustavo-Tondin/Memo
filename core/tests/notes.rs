@@ -1,0 +1,239 @@
+//! Notes against the real filesystem (phase 8).
+//!
+//! The exit criterion of the phase, as tests: jot an idea down, find it again
+//! by search, delete it — with the files readable outside the app.
+
+use chrono::NaiveDate;
+use memo_core::{NoteFolder, Notebook};
+
+fn today() -> NaiveDate {
+    NaiveDate::from_ymd_opt(2026, 7, 21).unwrap()
+}
+
+fn folder() -> (tempfile::TempDir, NoteFolder) {
+    let dir = tempfile::tempdir().unwrap();
+    Notebook::init(dir.path()).unwrap();
+    let notes = NoteFolder::new(dir.path().join("Notes"));
+    notes.ensure_default_folders().unwrap();
+    (dir, notes)
+}
+
+fn read(path: impl AsRef<std::path::Path>) -> String {
+    std::fs::read_to_string(path).unwrap()
+}
+
+#[test]
+fn the_whole_phase_eight_scenario_end_to_end() {
+    // Jot it down, find it by search, delete it.
+    let (dir, notes) = folder();
+
+    let path = notes.create("Inbox", "Ideia de produto", today()).unwrap();
+    assert_eq!(path, "Inbox/Ideia de produto.md");
+    notes
+        .write(&path, "Um leitor de markdown embutido no app.\n", today())
+        .unwrap();
+
+    let found = notes.search("leitor").unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].title, "Ideia de produto");
+    assert_eq!(found[0].folder, "Inbox");
+    assert_eq!(found[0].created, Some(today()));
+
+    // Readable outside the app, and the frontmatter is the documented shape.
+    let on_disk = read(dir.path().join("Notes/Inbox/Ideia de produto.md"));
+    assert_eq!(
+        on_disk,
+        "---\ncreated: 2026-07-21\n---\n\nUm leitor de markdown embutido no app.\n"
+    );
+
+    notes.delete(&path).unwrap();
+    assert!(notes.notes().unwrap().is_empty());
+    assert!(!dir.path().join("Notes/Inbox/Ideia de produto.md").exists());
+}
+
+#[test]
+fn a_note_written_by_hand_is_adopted_without_being_rewritten_on_read() {
+    // Someone wrote it in Obsidian. Reading must not touch the file — the
+    // same courtesy the lazy task id gets.
+    let (dir, notes) = folder();
+    let path = dir.path().join("Notes/Inbox/solta.md");
+    let original = "Uma ideia escrita fora do app.\n";
+    std::fs::write(&path, original).unwrap();
+
+    let listed = notes.notes().unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].title, "solta");
+    assert_eq!(listed[0].created, None, "no frontmatter, no date");
+    assert_eq!(read(&path), original, "reading rewrote the file");
+
+    // The first save by the app is what adopts `created`.
+    notes.write("Inbox/solta.md", "Editada.\n", today()).unwrap();
+    assert_eq!(read(&path), "---\ncreated: 2026-07-21\n---\n\nEditada.\n");
+}
+
+#[test]
+fn folders_are_free_and_notes_are_found_all_the_way_down() {
+    let (dir, notes) = folder();
+    notes.create_folder("Clientes/Riwer").unwrap();
+    std::fs::write(
+        dir.path().join("Notes/Clientes/Riwer/briefing.md"),
+        "Marca e tom de voz.\n",
+    )
+    .unwrap();
+    notes.create("Inbox", "solta", today()).unwrap();
+
+    let all = notes.notes().unwrap();
+    let paths: Vec<&str> = all.iter().map(|n| n.path.as_str()).collect();
+    assert!(paths.contains(&"Clientes/Riwer/briefing.md"));
+    assert!(paths.contains(&"Inbox/solta.md"));
+
+    let folders = notes.folders().unwrap();
+    assert!(folders.contains(&"Clientes".to_string()));
+    assert!(folders.contains(&"Clientes/Riwer".to_string()));
+}
+
+#[test]
+fn pinned_notes_come_first_then_the_newest() {
+    let (_dir, notes) = folder();
+    let old = notes.create("Inbox", "antiga", today()).unwrap();
+    let new = notes
+        .create("Inbox", "nova", NaiveDate::from_ymd_opt(2026, 7, 22).unwrap())
+        .unwrap();
+    let pinned = notes.create("Inbox", "fixada", today()).unwrap();
+    notes.set_pinned(&pinned, true).unwrap();
+
+    let titles: Vec<String> = notes
+        .notes()
+        .unwrap()
+        .into_iter()
+        .map(|n| n.title)
+        .collect();
+    assert_eq!(titles, vec!["fixada", "nova", "antiga"]);
+
+    // Unpinning removes the mark from the file rather than writing `false`.
+    notes.set_pinned(&pinned, false).unwrap();
+    assert!(!notes.read(&pinned).unwrap().pinned);
+    assert_eq!(notes.notes().unwrap()[0].title, "nova");
+
+    // And the other two are untouched by any of it.
+    assert!(notes.read(&old).is_ok());
+    assert!(notes.read(&new).is_ok());
+}
+
+#[test]
+fn search_looks_at_the_title_and_the_body() {
+    let (_dir, notes) = folder();
+    let a = notes.create("Inbox", "Receita de bolo", today()).unwrap();
+    notes.write(&a, "Farinha, ovos, açúcar.\n", today()).unwrap();
+    let b = notes.create("Inbox", "Compras", today()).unwrap();
+    notes.write(&b, "Comprar farinha na feira.\n", today()).unwrap();
+
+    assert_eq!(notes.search("receita").unwrap().len(), 1, "pelo título");
+    assert_eq!(notes.search("farinha").unwrap().len(), 2, "pelo corpo");
+    assert_eq!(notes.search("FARINHA").unwrap().len(), 2, "sem caso");
+    assert_eq!(notes.search("  ").unwrap().len(), 2, "vazia mostra tudo");
+    assert!(notes.search("inexistente").unwrap().is_empty());
+}
+
+#[test]
+fn renaming_and_moving_keep_the_content() {
+    let (dir, notes) = folder();
+    let path = notes.create("Inbox", "rascunho", today()).unwrap();
+    notes.write(&path, "Conteúdo.\n", today()).unwrap();
+
+    let renamed = notes.rename(&path, "Ideia boa").unwrap();
+    assert_eq!(renamed, "Inbox/Ideia boa.md");
+
+    let moved = notes.move_to(&renamed, "Clientes/Riwer").unwrap();
+    assert_eq!(moved, "Clientes/Riwer/Ideia boa.md");
+    assert!(notes.read(&moved).unwrap().body.contains("Conteúdo"));
+    assert!(!dir.path().join("Notes/Inbox/Ideia boa.md").exists());
+}
+
+#[test]
+fn a_name_clash_never_overwrites_a_note() {
+    let (_dir, notes) = folder();
+    let first = notes.create("Inbox", "ideia", today()).unwrap();
+    notes.write(&first, "A primeira.\n", today()).unwrap();
+
+    let second = notes.create("Inbox", "ideia", today()).unwrap();
+    assert_eq!(second, "Inbox/ideia 2.md");
+    assert!(notes.read(&first).unwrap().body.contains("A primeira"));
+
+    // Renaming onto an existing name is refused rather than silently merged.
+    assert!(notes.rename(&second, "ideia").is_err());
+}
+
+#[test]
+fn note_addresses_that_could_escape_the_folder_are_refused() {
+    let (_dir, notes) = folder();
+
+    for bad in [
+        "../fora.md",
+        "Inbox/../../etc/passwd.md",
+        "/etc/passwd.md",
+        ".oculta.md",
+        "Inbox/.oculta.md",
+        "Inbox/nota",     // not a .md
+        "Inbox/a\0b.md",
+    ] {
+        assert!(
+            notes.read(bad).is_err(),
+            "should have refused note address {bad:?}"
+        );
+    }
+
+    // A title that would break out becomes a safe file name instead of an
+    // error — the user typed a title, not a path.
+    let path = notes.create("Inbox", "../fuga", today()).unwrap();
+    assert_eq!(path, "Inbox/-fuga.md");
+}
+
+#[test]
+fn hidden_files_and_sync_conflicts_are_not_notes() {
+    let (dir, notes) = folder();
+    std::fs::write(dir.path().join("Notes/Inbox/.oculta.md"), "x\n").unwrap();
+    std::fs::write(
+        dir.path()
+            .join("Notes/Inbox/nota.sync-conflict-20260721-090000-ABC.md"),
+        "versão do celular\n",
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("Notes/Inbox/nota.md"), "a boa\n").unwrap();
+
+    let listed = notes.notes().unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].title, "nota");
+}
+
+#[test]
+fn a_checklist_in_a_note_stays_a_note() {
+    // Spec 5, the decision the user confirmed: it must not become a task
+    // list, and the notebook's task side must never see it.
+    let (dir, notes) = folder();
+    let path = notes.create("Inbox", "lista de compras", today()).unwrap();
+    notes
+        .write(&path, "- [ ] leite\n- [x] pão\n", today())
+        .unwrap();
+
+    let notebook = Notebook::open(dir.path()).unwrap();
+    let lists: Vec<String> = notebook
+        .lists()
+        .unwrap()
+        .into_iter()
+        .map(|l| l.path)
+        .collect();
+    assert!(
+        !lists.iter().any(|p| p.starts_with("Notes/")),
+        "a note must never be listed as a task list: {lists:?}"
+    );
+    assert!(notebook
+        .suggestions_for(memo_core::state::Period::Day)
+        .unwrap()
+        .is_empty());
+
+    // And the text is exactly what was written — no ids, no rewriting.
+    let on_disk = read(dir.path().join("Notes/Inbox/lista de compras.md"));
+    assert!(on_disk.ends_with("- [ ] leite\n- [x] pão\n"));
+    assert!(!on_disk.contains("<!--id"));
+}

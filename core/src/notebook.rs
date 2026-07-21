@@ -170,6 +170,7 @@ impl Notebook {
         if !notebook.is_read_only() {
             notebook.ensure_fixed_workspaces()?;
             notebook.ensure_default_lists()?;
+            notebook.ensure_default_note_folders()?;
             notebook.write_format_guide()?;
         }
         Ok(notebook)
@@ -192,6 +193,7 @@ impl Notebook {
         notebook.config.save(notebook.config_path())?;
         notebook.ensure_fixed_workspaces()?;
         notebook.ensure_default_lists()?;
+        notebook.ensure_default_note_folders()?;
         notebook.write_format_guide()?;
         Ok(notebook)
     }
@@ -353,6 +355,38 @@ impl Notebook {
         Ok(folders)
     }
 
+    /// Every notes-widget folder in the notebook, with its root-relative
+    /// prefix — the notes counterpart of [`Notebook::task_folders`].
+    pub fn note_folders(&self) -> Result<Vec<(String, crate::notefolder::NoteFolder)>> {
+        let mut folders = Vec::new();
+        for workspace in self.workspaces()? {
+            for spec in &workspace.config.widgets {
+                if spec.kind != "notes" {
+                    continue;
+                }
+                let Some(dir) = workspace.widget_dir(spec)? else {
+                    continue;
+                };
+                let prefix = dir
+                    .strip_prefix(&self.root)
+                    .unwrap_or(&dir)
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                folders.push((prefix, crate::notefolder::NoteFolder::new(dir)));
+            }
+        }
+        Ok(folders)
+    }
+
+    /// The notes folder at a root-relative address, e.g. `Notes`.
+    pub fn note_folder(&self, prefix: &str) -> Result<crate::notefolder::NoteFolder> {
+        self.note_folders()?
+            .into_iter()
+            .find(|(at, _)| at == prefix)
+            .map(|(_, folder)| folder)
+            .ok_or_else(|| Error::InvalidNotePath(prefix.to_string()))
+    }
+
     /// The lists of the notebook, across every workspace's tasks widgets.
     /// Sorted by name, which is what a sidebar shows.
     pub fn lists(&self) -> Result<Vec<ListEntry>> {
@@ -467,6 +501,15 @@ impl Notebook {
     /// Whether a list is one the app recreates on every open.
     pub fn is_default_list(name: &str) -> bool {
         name == INBOX_LIST || name == COMPLETED_LIST
+    }
+
+    /// Recreates the `Inbox` folder of every notes widget when missing —
+    /// loose notes land there (spec 5), same courtesy `Inbox.md` gets.
+    pub fn ensure_default_note_folders(&self) -> Result<()> {
+        for (_, folder) in self.note_folders()? {
+            folder.ensure_default_folders()?;
+        }
+        Ok(())
     }
 
     /// Recreates `Inbox.md` and `Completed.md` when missing. Called on every
