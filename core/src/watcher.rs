@@ -16,7 +16,7 @@ use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher as _};
 use serde::Serialize;
 
 use crate::error::{Error, Result};
-use crate::{NOTEBOOK_CONFIG_DIR, TASKS_DIR};
+use crate::NOTEBOOK_CONFIG_DIR;
 
 /// Which part of the notebook changed.
 ///
@@ -26,7 +26,8 @@ use crate::{NOTEBOOK_CONFIG_DIR, TASKS_DIR};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum Change {
-    /// A task list under `Tasks/`.
+    /// A `.md` file in any workspace — a task list, or (until phase 8 gives
+    /// them their own kind) a note.
     List { path: PathBuf },
     /// A day/week state file.
     State { path: PathBuf },
@@ -40,7 +41,7 @@ pub enum Change {
 }
 
 impl Change {
-    fn classify(path: PathBuf, config_dir: &Path, tasks_dir: &Path) -> Option<Self> {
+    fn classify(path: PathBuf, config_dir: &Path) -> Option<Self> {
         // Our own atomic writes land as `*.tmp` before the rename. Reporting
         // those would wake the app up twice for every single save.
         if path.extension().is_some_and(|ext| ext == "tmp") {
@@ -62,7 +63,13 @@ impl Change {
             });
         }
 
-        if path.starts_with(tasks_dir) && path.extension().is_some_and(|ext| ext == "md") {
+        // Any `.md` outside `.memo/` is content — a list in *any* workspace,
+        // or (phase 8) a note. The old rule only knew `Tasks/`, so a list in
+        // a user workspace came back as `Other`, the UI never reloaded, and
+        // the app's next save would overwrite the external edit in silence.
+        // A note classified as `List` merely causes a harmless reload; phase
+        // 8 refines the kinds.
+        if path.extension().is_some_and(|ext| ext == "md") {
             return Some(Self::List { path });
         }
 
@@ -97,7 +104,6 @@ impl NotebookWatcher {
     pub fn start(root: impl AsRef<Path>) -> Result<Self> {
         let root = root.as_ref().to_path_buf();
         let config_dir = root.join(NOTEBOOK_CONFIG_DIR);
-        let tasks_dir = root.join(TASKS_DIR);
 
         let (tx, rx) = channel();
         let mut watcher = notify::recommended_watcher(move |event: notify::Result<Event>| {
@@ -106,7 +112,7 @@ impl NotebookWatcher {
                 return;
             }
             for path in event.paths {
-                if let Some(change) = Change::classify(path, &config_dir, &tasks_dir) {
+                if let Some(change) = Change::classify(path, &config_dir) {
                     // A closed receiver just means the app dropped the
                     // watcher; nothing to recover from.
                     let _ = tx.send(change);
@@ -172,29 +178,35 @@ impl From<notify::Error> for Error {
 mod tests {
     use super::*;
 
-    fn dirs(root: &Path) -> (PathBuf, PathBuf) {
-        (root.join(NOTEBOOK_CONFIG_DIR), root.join(TASKS_DIR))
+    fn config_dir(root: &Path) -> PathBuf {
+        root.join(NOTEBOOK_CONFIG_DIR)
     }
 
     #[test]
     fn classifies_the_notebook_layout() {
         let root = Path::new("/caderno");
-        let (config_dir, tasks_dir) = dirs(root);
+        let config_dir = config_dir(root);
 
-        let list = Change::classify(tasks_dir.join("Compras.md"), &config_dir, &tasks_dir);
+        let list = Change::classify(root.join("Tasks/Compras.md"), &config_dir);
         assert_eq!(list.as_ref().unwrap().list_name().as_deref(), Some("Compras"));
         assert!(matches!(list, Some(Change::List { .. })));
 
         assert!(matches!(
-            Change::classify(config_dir.join("config.json"), &config_dir, &tasks_dir),
+            Change::classify(config_dir.join("config.json"), &config_dir),
             Some(Change::Config)
         ));
         assert!(matches!(
-            Change::classify(config_dir.join("daily-state.json"), &config_dir, &tasks_dir),
+            Change::classify(config_dir.join("daily-state.json"), &config_dir),
             Some(Change::State { .. })
         ));
+        // Any `.md` outside `.memo/` is content now — including notes; a
+        // spurious reload is harmless, a missed one loses data.
         assert!(matches!(
-            Change::classify(root.join("Notas/Ideias.md"), &config_dir, &tasks_dir),
+            Change::classify(root.join("Notes/Ideias.md"), &config_dir),
+            Some(Change::List { .. })
+        ));
+        assert!(matches!(
+            Change::classify(root.join("anexo.pdf"), &config_dir),
             Some(Change::Other { .. })
         ));
     }
@@ -218,19 +230,29 @@ mod tests {
     #[test]
     fn ignores_our_own_atomic_write_temporaries() {
         let root = Path::new("/caderno");
-        let (config_dir, tasks_dir) = dirs(root);
+        let config_dir = config_dir(root);
 
         assert_eq!(
-            Change::classify(tasks_dir.join("Inbox.md.tmp"), &config_dir, &tasks_dir),
+            Change::classify(root.join("Tasks/Inbox.md.tmp"), &config_dir),
             None
         );
         assert_eq!(
-            Change::classify(
-                config_dir.join("daily-state.json.tmp"),
-                &config_dir,
-                &tasks_dir
-            ),
+            Change::classify(config_dir.join("daily-state.json.tmp"), &config_dir),
             None
         );
+    }
+
+    #[test]
+    fn a_list_in_a_user_workspace_is_a_list_not_other() {
+        // The old rule only knew Tasks/: an external edit to a user
+        // workspace's list came back as Other, the UI never reloaded, and
+        // the app's next save overwrote the edit in silence.
+        let root = Path::new("/caderno");
+        let config_dir = config_dir(root);
+
+        assert!(matches!(
+            Change::classify(root.join("Project A/Backlog/Backlog.md"), &config_dir),
+            Some(Change::List { .. })
+        ));
     }
 }

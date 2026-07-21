@@ -168,6 +168,7 @@ impl Notebook {
         // A notebook written by a newer app is opened for reading only, so
         // nothing here may touch the disk.
         if !notebook.is_read_only() {
+            notebook.ensure_fixed_workspaces()?;
             notebook.ensure_default_lists()?;
             notebook.write_format_guide()?;
         }
@@ -181,22 +182,53 @@ impl Notebook {
             return Err(Error::AlreadyANotebook(root));
         }
 
-        for dir in [
-            root.join(NOTEBOOK_CONFIG_DIR),
-            root.join(TASKS_DIR),
-            root.join(NOTES_DIR),
-        ] {
-            std::fs::create_dir_all(&dir).ctx(&dir)?;
-        }
+        let dir = root.join(NOTEBOOK_CONFIG_DIR);
+        std::fs::create_dir_all(&dir).ctx(&dir)?;
 
         let notebook = Self {
             root,
             config: Config::default(),
         };
         notebook.config.save(notebook.config_path())?;
+        notebook.ensure_fixed_workspaces()?;
         notebook.ensure_default_lists()?;
         notebook.write_format_guide()?;
         Ok(notebook)
+    }
+
+    /// Recreates the three fixed workspaces — Home, Tasks, Notes — when their
+    /// folder or marker is missing. Called on init and on every open, same
+    /// treatment the default lists get: the user may delete things outside
+    /// the app, and the app must not break.
+    ///
+    /// Only the **markers** are recreated; the contents of the folders are
+    /// never touched. A `.workspace.json` the user edited is left exactly as
+    /// it is — recreating is not rewriting.
+    fn ensure_fixed_workspaces(&self) -> Result<()> {
+        const FIXED: [(&str, &str); 3] = [
+            (
+                "Home",
+                "{\n  \"schemaVersion\": 1,\n  \"name\": \"Home\",\n  \"widgets\": []\n}\n",
+            ),
+            (
+                TASKS_DIR,
+                "{\n  \"schemaVersion\": 1,\n  \"widgets\": [{ \"type\": \"tasks\", \"folder\": \".\" }]\n}\n",
+            ),
+            (
+                NOTES_DIR,
+                "{\n  \"schemaVersion\": 1,\n  \"widgets\": [{ \"type\": \"notes\", \"folder\": \".\" }]\n}\n",
+            ),
+        ];
+
+        for (name, config) in FIXED {
+            let dir = self.root.join(name);
+            std::fs::create_dir_all(&dir).ctx(&dir)?;
+            let marker = dir.join(crate::workspace::WORKSPACE_CONFIG_FILE);
+            if !marker.exists() {
+                crate::fsio::write_atomically(&marker, config.as_bytes())?;
+            }
+        }
+        Ok(())
     }
 
     fn write_format_guide(&self) -> Result<()> {
@@ -297,41 +329,70 @@ impl Notebook {
         ))
     }
 
-    /// The lists of the notebook, ready for the navigation.
-    ///
-    /// Today this is the fixed `Tasks/` folder; step D widens it to every
-    /// workspace. Sorted by name, which is what a sidebar shows.
+    /// Every tasks-widget folder in the notebook, with its root-relative
+    /// prefix. This is the walk behind lists, counts, conflicts and
+    /// suggestions — one definition of "where tasks live", not four.
+    fn task_folders(&self) -> Result<Vec<(String, crate::folder::TaskFolder)>> {
+        let mut folders = Vec::new();
+        for workspace in self.workspaces()? {
+            for spec in &workspace.config.widgets {
+                if spec.kind != "tasks" {
+                    continue;
+                }
+                let Some(dir) = workspace.widget_dir(spec)? else {
+                    continue;
+                };
+                let prefix = dir
+                    .strip_prefix(&self.root)
+                    .unwrap_or(&dir)
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                folders.push((prefix, crate::folder::TaskFolder::new(dir)));
+            }
+        }
+        Ok(folders)
+    }
+
+    /// The lists of the notebook, across every workspace's tasks widgets.
+    /// Sorted by name, which is what a sidebar shows.
     pub fn lists(&self) -> Result<Vec<ListEntry>> {
-        let mut entries: Vec<ListEntry> = self
-            .tasks_folder()
-            .list_names()?
-            .into_iter()
-            .map(|name| ListEntry {
-                path: format!("{TASKS_DIR}/{name}.md"),
-                name,
-            })
-            .collect();
-        entries.sort_by(|a, b| a.name.cmp(&b.name));
+        let mut entries: Vec<ListEntry> = Vec::new();
+        for (prefix, folder) in self.task_folders()? {
+            for name in folder.list_names()? {
+                entries.push(ListEntry {
+                    path: format!("{prefix}/{name}.md"),
+                    name,
+                });
+            }
+        }
+        entries.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.path.cmp(&b.path)));
         Ok(entries)
     }
 
-    /// How many open tasks each list has, keyed by address.
+    /// How many open tasks each list has, keyed by address, across every
+    /// workspace's tasks widgets.
     pub fn open_task_counts(&self) -> Result<BTreeMap<String, usize>> {
-        Ok(self
-            .tasks_folder()
-            .open_task_counts()?
-            .into_iter()
-            .map(|(name, count)| (format!("{TASKS_DIR}/{name}.md"), count))
-            .collect())
+        let mut counts = BTreeMap::new();
+        for (prefix, folder) in self.task_folders()? {
+            for (name, count) in folder.open_task_counts()? {
+                counts.insert(format!("{prefix}/{name}.md"), count);
+            }
+        }
+        Ok(counts)
     }
 
     /// Conflicting copies sitting in the notebook right now.
     ///
-    /// Scans the tasks folder and the config folder, which is where sync tools
-    /// leave them. Reporting is all this does — the user decides what to keep.
+    /// Scans the config folder and every tasks-widget folder, which is where
+    /// sync tools leave them. Reporting is all this does — the user decides
+    /// what to keep.
     pub fn conflicts(&self) -> Result<Vec<Conflict>> {
         let mut found = Vec::new();
-        for dir in [self.tasks_dir(), self.config_dir()] {
+        let mut dirs = vec![self.config_dir()];
+        for (_, folder) in self.task_folders()? {
+            dirs.push(folder.dir().to_path_buf());
+        }
+        for dir in dirs {
             let entries = match std::fs::read_dir(&dir) {
                 Ok(entries) => entries,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
