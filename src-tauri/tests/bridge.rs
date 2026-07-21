@@ -140,7 +140,7 @@ fn opening_a_notebook_reports_it_and_creates_the_layout() {
     assert_eq!(info["readOnly"], json!(false));
     assert_eq!(
         info["lists"],
-        json!(["Completed", "Inbox"]),
+        json!([{"path": "Tasks/Completed.md", "name": "Completed"}, {"path": "Tasks/Inbox.md", "name": "Inbox"}]),
         "default lists should exist and be sorted"
     );
     assert!(dir.path().join(".memo/config.json").is_file());
@@ -151,16 +151,16 @@ fn opening_a_notebook_reports_it_and_creates_the_layout() {
 fn the_full_task_lifecycle_over_the_bridge() {
     let (_lock, app, dir) = app_with_notebook();
 
-    ok(&app, "create_list", json!({ "name": "Compras" }));
-    let id = task_with_id(&app, "Compras", "Comprar leite");
+    ok(&app, "create_list", json!({ "folder": "Tasks", "name": "Compras" }));
+    let id = task_with_id(&app, "Tasks/Compras.md", "Comprar leite");
 
     ok(
         &app,
         "edit_task_text",
-        json!({ "list": "Compras", "id": id, "text": "Comprar leite integral" }),
+        json!({ "list": "Tasks/Compras.md", "id": id, "text": "Comprar leite integral" }),
     );
 
-    let tasks = ok(&app, "list_tasks", json!({ "list": "Compras" }));
+    let tasks = ok(&app, "list_tasks", json!({ "list": "Tasks/Compras.md" }));
     assert_eq!(tasks[0]["text"], "Comprar leite integral");
     assert_eq!(tasks[0]["done"], json!(false));
 
@@ -168,20 +168,20 @@ fn the_full_task_lifecycle_over_the_bridge() {
     ok(
         &app,
         "pull_into_period",
-        json!({ "period": "week", "list": "Compras", "id": id }),
+        json!({ "period": "week", "list": "Tasks/Compras.md", "id": id }),
     );
     ok(
         &app,
         "pull_into_period",
-        json!({ "period": "day", "list": "Compras", "id": id }),
+        json!({ "period": "day", "list": "Tasks/Compras.md", "id": id }),
     );
     let state = ok(&app, "period_state", json!({ "period": "day" }));
-    assert_eq!(state["items"][0]["list"], "Compras");
+    assert_eq!(state["items"][0]["path"], "Tasks/Compras.md");
 
     ok(
         &app,
         "complete_task",
-        json!({ "list": "Compras", "id": id }),
+        json!({ "list": "Tasks/Compras.md", "id": id }),
     );
     let state = ok(&app, "period_state", json!({ "period": "day" }));
     assert_eq!(state["items"], json!([]));
@@ -190,8 +190,8 @@ fn the_full_task_lifecycle_over_the_bridge() {
     assert!(completed.contains("- [x] Comprar leite integral"));
     assert!(completed.contains("origin:Compras"));
 
-    ok(&app, "uncomplete_task", json!({ "id": id }));
-    let tasks = ok(&app, "list_tasks", json!({ "list": "Compras" }));
+    ok(&app, "uncomplete_task", json!({ "list": "Tasks/Completed.md", "id": id }));
+    let tasks = ok(&app, "list_tasks", json!({ "list": "Tasks/Compras.md" }));
     assert_eq!(tasks[0]["done"], json!(false));
 }
 
@@ -210,14 +210,14 @@ fn creating_a_task_from_today_writes_it_to_the_inbox() {
     assert!(inbox.contains("Responder e-mail"));
 
     let state = ok(&app, "period_state", json!({ "period": "day" }));
-    assert_eq!(state["items"][0]["list"], "Inbox");
+    assert_eq!(state["items"][0]["path"], "Tasks/Inbox.md");
     assert_eq!(state["items"][0]["id"], id);
 
     assert_eq!(
         ok(
             &app,
             "remove_from_period",
-            json!({ "period": "day", "list": "Inbox", "id": id })
+            json!({ "period": "day", "list": "Tasks/Inbox.md", "id": id })
         ),
         json!(true)
     );
@@ -227,22 +227,22 @@ fn creating_a_task_from_today_writes_it_to_the_inbox() {
 fn list_management_over_the_bridge() {
     let (_lock, app, dir) = app_with_notebook();
 
-    ok(&app, "create_list", json!({ "name": "Compras" }));
+    ok(&app, "create_list", json!({ "folder": "Tasks", "name": "Compras" }));
     ok(
         &app,
         "create_task",
-        json!({ "list": "Compras", "text": "Comprar leite" }),
+        json!({ "list": "Tasks/Compras.md", "text": "Comprar leite" }),
     );
 
     ok(
         &app,
         "rename_list",
-        json!({ "from": "Compras", "to": "Mercado" }),
+        json!({ "from": "Tasks/Compras.md", "to": "Mercado" }),
     );
     assert!(dir.path().join("Tasks/Mercado.md").is_file());
 
     // Deleting rescues the task into the Inbox rather than dropping it.
-    let rescued = ok(&app, "delete_list", json!({ "name": "Mercado" }));
+    let rescued = ok(&app, "delete_list", json!({ "name": "Tasks/Mercado.md" }));
     assert_eq!(rescued, json!(1));
     assert!(std::fs::read_to_string(dir.path().join("Tasks/Inbox.md"))
         .unwrap()
@@ -256,16 +256,16 @@ fn errors_arrive_typed_so_the_ui_can_branch_on_them() {
     let err = invoke(
         &app,
         "complete_task",
-        json!({ "list": "Inbox", "id": "nao-existe" }),
+        json!({ "list": "Tasks/Inbox.md", "id": "nao-existe" }),
     )
     .unwrap_err();
     assert_eq!(err["kind"], "taskNotFound");
     assert!(err["message"].as_str().unwrap().contains("nao-existe"));
 
-    let err = invoke(&app, "delete_list", json!({ "name": "Inbox" })).unwrap_err();
+    let err = invoke(&app, "delete_list", json!({ "name": "Tasks/Inbox.md" })).unwrap_err();
     assert_eq!(err["kind"], "protectedList");
 
-    let err = invoke(&app, "create_list", json!({ "name": "../fuga" })).unwrap_err();
+    let err = invoke(&app, "create_list", json!({ "folder": "Tasks", "name": "../fuga" })).unwrap_err();
     assert_eq!(err["kind"], "invalidListName");
 }
 
@@ -391,26 +391,26 @@ fn dialog_helpers_are_never_called_from_a_blocking_command() {
 #[test]
 fn the_day_offers_the_week_first_then_the_rest() {
     let (_lock, app, _dir) = app_with_notebook();
-    ok(&app, "create_list", json!({ "name": "Compras" }));
+    ok(&app, "create_list", json!({ "folder": "Tasks", "name": "Compras" }));
 
-    let solta = task_with_id(&app, "Inbox", "Tarefa solta");
-    let semana = task_with_id(&app, "Compras", "Escolhida pra semana");
+    let solta = task_with_id(&app, "Tasks/Inbox.md", "Tarefa solta");
+    let semana = task_with_id(&app, "Tasks/Compras.md", "Escolhida pra semana");
     ok(
         &app,
         "pull_into_period",
-        json!({ "period": "week", "list": "Compras", "id": semana }),
+        json!({ "period": "week", "list": "Tasks/Compras.md", "id": semana }),
     );
 
     let suggestions = ok(&app, "period_suggestions", json!({ "period": "day" }));
     assert_eq!(suggestions[0]["task"]["id"], semana);
-    assert_eq!(suggestions[0]["list"], "Compras");
+    assert_eq!(suggestions[0]["path"], "Tasks/Compras.md");
     assert_eq!(suggestions[1]["task"]["id"], solta);
 
     // Once pulled, it stops being a suggestion and shows up as pulled.
     ok(
         &app,
         "pull_into_period",
-        json!({ "period": "day", "list": "Compras", "id": semana }),
+        json!({ "period": "day", "list": "Tasks/Compras.md", "id": semana }),
     );
     let pulled = ok(&app, "period_tasks", json!({ "period": "day" }));
     assert_eq!(pulled[0]["task"]["text"], "Escolhida pra semana");
@@ -422,7 +422,7 @@ fn the_day_offers_the_week_first_then_the_rest() {
 #[test]
 fn sync_conflicts_reach_the_frontend() {
     let (_lock, app, dir) = app_with_notebook();
-    ok(&app, "create_list", json!({ "name": "Compras" }));
+    ok(&app, "create_list", json!({ "folder": "Tasks", "name": "Compras" }));
 
     assert_eq!(ok(&app, "list_conflicts", json!({})), json!([]));
 
@@ -439,19 +439,19 @@ fn sync_conflicts_reach_the_frontend() {
     assert!(conflicts[0]["original"].as_str().unwrap().ends_with("Compras.md"));
 
     // And it must not have become a list in the sidebar.
-    assert_eq!(ok(&app, "list_names", json!({})), json!(["Completed", "Compras", "Inbox"]));
+    assert_eq!(ok(&app, "list_names", json!({})), json!([{"path": "Tasks/Completed.md", "name": "Completed"}, {"path": "Tasks/Compras.md", "name": "Compras"}, {"path": "Tasks/Inbox.md", "name": "Inbox"}]));
 }
 
 #[test]
 fn the_rich_fields_round_trip_through_the_bridge() {
     let (_lock, app, dir) = app_with_notebook();
-    let id = task_with_id(&app, "Inbox", "Comprar material");
+    let id = task_with_id(&app, "Tasks/Inbox.md", "Comprar material");
 
     ok(
         &app,
         "set_task_fields",
         json!({
-            "list": "Inbox",
+            "list": "Tasks/Inbox.md",
             "id": id,
             "fields": {
                 "due": "2026-07-25",
@@ -472,7 +472,7 @@ fn the_rich_fields_round_trip_through_the_bridge() {
     assert!(on_disk.contains("repeat: every-week"));
     assert!(on_disk.contains("  - [ ] Cimento"));
 
-    let tasks = ok(&app, "list_tasks", json!({ "list": "Inbox" }));
+    let tasks = ok(&app, "list_tasks", json!({ "list": "Tasks/Inbox.md" }));
     assert_eq!(tasks[0]["due"], "2026-07-25");
     assert_eq!(tasks[0]["priority"], json!(2));
     assert_eq!(tasks[0]["subtasks"][0]["text"], "Cimento");
@@ -481,12 +481,12 @@ fn the_rich_fields_round_trip_through_the_bridge() {
 #[test]
 fn a_field_can_be_cleared_but_only_when_mentioned() {
     let (_lock, app, _dir) = app_with_notebook();
-    let id = task_with_id(&app, "Inbox", "Tarefa");
+    let id = task_with_id(&app, "Tasks/Inbox.md", "Tarefa");
 
     ok(
         &app,
         "set_task_fields",
-        json!({ "list": "Inbox", "id": id,
+        json!({ "list": "Tasks/Inbox.md", "id": id,
                 "fields": { "due": "2026-07-25", "priority": 1 } }),
     );
 
@@ -494,9 +494,9 @@ fn a_field_can_be_cleared_but_only_when_mentioned() {
     ok(
         &app,
         "set_task_fields",
-        json!({ "list": "Inbox", "id": id, "fields": { "priority": 3 } }),
+        json!({ "list": "Tasks/Inbox.md", "id": id, "fields": { "priority": 3 } }),
     );
-    let tasks = ok(&app, "list_tasks", json!({ "list": "Inbox" }));
+    let tasks = ok(&app, "list_tasks", json!({ "list": "Tasks/Inbox.md" }));
     assert_eq!(tasks[0]["due"], "2026-07-25", "não mencionado, preservado");
     assert_eq!(tasks[0]["priority"], json!(3));
 
@@ -504,9 +504,9 @@ fn a_field_can_be_cleared_but_only_when_mentioned() {
     ok(
         &app,
         "set_task_fields",
-        json!({ "list": "Inbox", "id": id, "fields": { "due": null } }),
+        json!({ "list": "Tasks/Inbox.md", "id": id, "fields": { "due": null } }),
     );
-    let tasks = ok(&app, "list_tasks", json!({ "list": "Inbox" }));
+    let tasks = ok(&app, "list_tasks", json!({ "list": "Tasks/Inbox.md" }));
     assert_eq!(tasks[0]["due"], Value::Null);
 }
 
@@ -514,13 +514,13 @@ fn a_field_can_be_cleared_but_only_when_mentioned() {
 fn reordering_rewrites_the_file_in_the_new_order() {
     let (_lock, app, dir) = app_with_notebook();
     for text in ["Primeira", "Segunda", "Terceira"] {
-        ok(&app, "create_task", json!({ "list": "Inbox", "text": text }));
+        ok(&app, "create_task", json!({ "list": "Tasks/Inbox.md", "text": text }));
     }
 
     ok(
         &app,
         "move_task_to",
-        json!({ "list": "Inbox", "from": 2, "to": 0 }),
+        json!({ "list": "Tasks/Inbox.md", "from": 2, "to": 0 }),
     );
 
     let on_disk = std::fs::read_to_string(dir.path().join("Tasks/Inbox.md")).unwrap();
@@ -575,16 +575,16 @@ fn a_partial_settings_payload_keeps_what_it_did_not_mention() {
 #[test]
 fn list_counts_follow_the_setting() {
     let (_lock, app, _dir) = app_with_notebook();
-    ok(&app, "create_list", json!({ "name": "Compras" }));
+    ok(&app, "create_list", json!({ "folder": "Tasks", "name": "Compras" }));
     ok(
         &app,
         "create_task",
-        json!({ "list": "Compras", "text": "Comprar leite" }),
+        json!({ "list": "Tasks/Compras.md", "text": "Comprar leite" }),
     );
 
     let counts = ok(&app, "list_counts", json!({}));
-    assert_eq!(counts["Compras"], json!(1));
-    assert_eq!(counts["Inbox"], json!(0));
+    assert_eq!(counts["Tasks/Compras.md"], json!(1));
+    assert_eq!(counts["Tasks/Inbox.md"], json!(0));
 
     // Turned off, the command answers empty — the frontend does not need to
     // know the rule, it just renders what it gets.
@@ -655,14 +655,14 @@ fn external_changes_reach_the_frontend_as_events() {
 #[test]
 fn opening_a_second_notebook_switches_the_open_one() {
     let (_lock, app, first) = app_with_notebook();
-    ok(&app, "create_list", json!({ "name": "SoNoPrimeiro" }));
+    ok(&app, "create_list", json!({ "folder": "Tasks", "name": "SoNoPrimeiro" }));
 
     let second = tempfile::tempdir().unwrap();
     ok(&app, "open_notebook", json!({ "path": second.path() }));
 
     let info = ok(&app, "current_notebook", json!({}));
     assert_eq!(info["path"], json!(second.path()));
-    assert_eq!(info["lists"], json!(["Completed", "Inbox"]));
+    assert_eq!(info["lists"], json!([{"path": "Tasks/Completed.md", "name": "Completed"}, {"path": "Tasks/Inbox.md", "name": "Inbox"}]));
 
     // The first notebook is untouched on disk, just no longer open.
     assert!(first.path().join("Tasks/SoNoPrimeiro.md").is_file());
@@ -674,11 +674,11 @@ fn the_snapshot_answers_everything_in_one_call() {
     // that on every pause in typing. One round trip keeps the cost flat as
     // notebooks grow — and nothing is cached, the files stay the truth.
     let (_lock, app, dir) = app_with_notebook();
-    ok(&app, "create_list", json!({ "name": "Compras" }));
+    ok(&app, "create_list", json!({ "folder": "Tasks", "name": "Compras" }));
     ok(
         &app,
         "create_task",
-        json!({ "list": "Compras", "text": "Comprar leite" }),
+        json!({ "list": "Tasks/Compras.md", "text": "Comprar leite" }),
     );
     std::fs::write(
         dir.path()
@@ -689,10 +689,10 @@ fn the_snapshot_answers_everything_in_one_call() {
 
     let snap = ok(&app, "notebook_snapshot", json!({}));
 
-    assert_eq!(snap["info"]["lists"], json!(["Completed", "Compras", "Inbox"]));
-    assert_eq!(snap["info"]["layout"]["inbox"], "Inbox");
-    assert_eq!(snap["info"]["layout"]["completed"], "Completed");
-    assert_eq!(snap["counts"]["Compras"], json!(1));
+    assert_eq!(snap["info"]["lists"], json!([{"path": "Tasks/Completed.md", "name": "Completed"}, {"path": "Tasks/Compras.md", "name": "Compras"}, {"path": "Tasks/Inbox.md", "name": "Inbox"}]));
+    assert_eq!(snap["info"]["layout"]["inbox"], "Tasks/Inbox.md");
+    assert_eq!(snap["info"]["layout"]["completed"], "Tasks/Completed.md");
+    assert_eq!(snap["counts"]["Tasks/Compras.md"], json!(1));
     assert_eq!(snap["conflicts"].as_array().unwrap().len(), 1);
     assert_eq!(snap["clock"]["today"].as_str().unwrap().len(), 10);
 }
@@ -702,16 +702,16 @@ fn a_spaced_list_survives_complete_and_undo_over_the_bridge() {
     // The origin used to truncate at the first space, and undo then CREATED
     // a list named after the first word. Spaced names are a documented case.
     let (_lock, app, dir) = app_with_notebook();
-    ok(&app, "create_list", json!({ "name": "Meu Mercado" }));
-    let id = task_with_id(&app, "Meu Mercado", "Comprar arroz");
+    ok(&app, "create_list", json!({ "folder": "Tasks", "name": "Meu Mercado" }));
+    let id = task_with_id(&app, "Tasks/Meu Mercado.md", "Comprar arroz");
 
-    ok(&app, "complete_task", json!({ "list": "Meu Mercado", "id": id }));
+    ok(&app, "complete_task", json!({ "list": "Tasks/Meu Mercado.md", "id": id }));
     let completed =
         std::fs::read_to_string(dir.path().join("Tasks/Completed.md")).unwrap();
     assert!(completed.contains("origin:\"Meu Mercado\""), "{completed}");
 
-    ok(&app, "uncomplete_task", json!({ "id": id }));
-    let tasks = ok(&app, "list_tasks", json!({ "list": "Meu Mercado" }));
+    ok(&app, "uncomplete_task", json!({ "list": "Tasks/Completed.md", "id": id }));
+    let tasks = ok(&app, "list_tasks", json!({ "list": "Tasks/Meu Mercado.md" }));
     assert_eq!(tasks[0]["text"], "Comprar arroz");
     assert!(
         !dir.path().join("Tasks/Meu.md").exists(),
@@ -725,12 +725,12 @@ fn hostile_fields_are_normalized_by_the_core_not_trusted_to_the_ui() {
     // description on the next read — silently deleting the date with it. The
     // rule lives in the core so every client is covered, not just our UI.
     let (_lock, app, _dir) = app_with_notebook();
-    let id = task_with_id(&app, "Inbox", "Comprar material");
+    let id = task_with_id(&app, "Tasks/Inbox.md", "Comprar material");
 
     ok(
         &app,
         "set_task_fields",
-        json!({ "list": "Inbox", "id": id, "fields": {
+        json!({ "list": "Tasks/Inbox.md", "id": id, "fields": {
             "due": "2026-07-25",
             "tags": ["casa nova", "#urgent", "casa nova", "  "],
             "text": "Comprar\nmaterial",
@@ -738,7 +738,7 @@ fn hostile_fields_are_normalized_by_the_core_not_trusted_to_the_ui() {
         }}),
     );
 
-    let tasks = ok(&app, "list_tasks", json!({ "list": "Inbox" }));
+    let tasks = ok(&app, "list_tasks", json!({ "list": "Tasks/Inbox.md" }));
     assert_eq!(tasks[0]["tags"], json!(["casa-nova", "urgent"]));
     assert_eq!(tasks[0]["due"], "2026-07-25", "the date must survive the tag");
     assert_eq!(tasks[0]["text"], "Comprar material");

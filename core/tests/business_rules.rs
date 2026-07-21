@@ -29,13 +29,13 @@ fn notebook_with_task(dir: &Path, text: &str) -> (Notebook, String) {
 fn completing_moves_the_task_to_completed_with_its_origin() {
     let dir = tempfile::tempdir().unwrap();
     let notebook = Notebook::init(dir.path()).unwrap();
-    notebook.create_list("Compras").unwrap();
+    notebook.create_list("Tasks", "Compras").unwrap();
 
-    let mut compras = notebook.open_list("Compras").unwrap();
+    let mut compras = notebook.open_list("Tasks/Compras.md").unwrap();
     let id = compras.add_text_with_id("Comprar leite");
     compras.save().unwrap();
 
-    let task = notebook.complete_task("Compras", &id).unwrap();
+    let task = notebook.complete_task("Tasks/Compras.md", &id).unwrap();
     assert!(task.done);
     assert_eq!(task.origin.as_deref(), Some("Compras"));
 
@@ -53,10 +53,10 @@ fn completing_drops_the_task_from_today_and_this_week() {
     let dir = tempfile::tempdir().unwrap();
     let (notebook, id) = notebook_with_task(dir.path(), "Ligar pro dentista");
 
-    notebook.pull_into(Period::Day, "Inbox", &id).unwrap();
-    notebook.pull_into(Period::Week, "Inbox", &id).unwrap();
+    notebook.pull_into(Period::Day, "Tasks/Inbox.md", &id).unwrap();
+    notebook.pull_into(Period::Week, "Tasks/Inbox.md", &id).unwrap();
 
-    notebook.complete_task("Inbox", &id).unwrap();
+    notebook.complete_task("Tasks/Inbox.md", &id).unwrap();
 
     // A reference left behind would render as a ghost row in Today.
     assert!(notebook.open_state(Period::Day).unwrap().state.is_empty());
@@ -67,14 +67,14 @@ fn completing_drops_the_task_from_today_and_this_week() {
 fn undoing_sends_the_task_back_to_its_origin_list() {
     let dir = tempfile::tempdir().unwrap();
     let notebook = Notebook::init(dir.path()).unwrap();
-    notebook.create_list("Compras").unwrap();
+    notebook.create_list("Tasks", "Compras").unwrap();
 
-    let mut compras = notebook.open_list("Compras").unwrap();
+    let mut compras = notebook.open_list("Tasks/Compras.md").unwrap();
     let id = compras.add_text_with_id("Comprar leite");
     compras.save().unwrap();
 
-    notebook.complete_task("Compras", &id).unwrap();
-    let task = notebook.uncomplete_task(&id).unwrap();
+    notebook.complete_task("Tasks/Compras.md", &id).unwrap();
+    let task = notebook.uncomplete_task("Tasks/Completed.md", &id).unwrap();
 
     assert!(!task.done);
     assert_eq!(task.origin, None, "origin is consumed by the undo");
@@ -88,18 +88,18 @@ fn undoing_sends_the_task_back_to_its_origin_list() {
 fn undoing_recreates_an_origin_list_that_was_deleted_outside_the_app() {
     let dir = tempfile::tempdir().unwrap();
     let notebook = Notebook::init(dir.path()).unwrap();
-    notebook.create_list("Compras").unwrap();
+    notebook.create_list("Tasks", "Compras").unwrap();
 
-    let mut compras = notebook.open_list("Compras").unwrap();
+    let mut compras = notebook.open_list("Tasks/Compras.md").unwrap();
     let id = compras.add_text_with_id("Comprar leite");
     compras.save().unwrap();
-    notebook.complete_task("Compras", &id).unwrap();
+    notebook.complete_task("Tasks/Compras.md", &id).unwrap();
 
     // The user deletes the list in the file manager while the task sits in
     // Completed.
     std::fs::remove_file(dir.path().join("Tasks/Compras.md")).unwrap();
 
-    notebook.uncomplete_task(&id).unwrap();
+    notebook.uncomplete_task("Tasks/Completed.md", &id).unwrap();
     assert!(read(dir.path().join("Tasks/Compras.md")).contains("Comprar leite"));
 }
 
@@ -115,7 +115,7 @@ fn undoing_a_task_without_a_usable_origin_falls_back_to_the_inbox() {
     )
     .unwrap();
 
-    notebook.uncomplete_task("abc123").unwrap();
+    notebook.uncomplete_task("Tasks/Completed.md", "abc123").unwrap();
     assert!(read(dir.path().join("Tasks/Inbox.md")).contains("Pagar internet"));
 }
 
@@ -124,7 +124,7 @@ fn undoing_an_unknown_id_fails_without_touching_anything() {
     let dir = tempfile::tempdir().unwrap();
     let notebook = Notebook::init(dir.path()).unwrap();
 
-    let err = notebook.uncomplete_task("nope").unwrap_err();
+    let err = notebook.uncomplete_task("Tasks/Completed.md", "nope").unwrap_err();
     assert!(matches!(err, Error::TaskNotFound(_)));
 }
 
@@ -140,18 +140,18 @@ fn reading_a_hand_written_list_leaves_the_file_exactly_as_it_was() {
     let original = "# Minha lista\n\n- [ ] escrita no Obsidian\n";
     std::fs::write(dir.path().join("Tasks/Inbox.md"), original).unwrap();
 
-    let tasks = notebook.tasks_in("Inbox").unwrap();
+    let tasks = notebook.tasks_in("Tasks/Inbox.md").unwrap();
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].id, None);
     assert_eq!(read(dir.path().join("Tasks/Inbox.md")), original);
 
     // Acting on it is what makes it addressable — and the heading survives.
-    let id = notebook.ensure_task_id("Inbox", 0).unwrap();
+    let id = notebook.ensure_task_id("Tasks/Inbox.md", 0).unwrap();
     let on_disk = read(dir.path().join("Tasks/Inbox.md"));
     assert!(on_disk.contains(&format!("id:{id}")));
     assert!(on_disk.contains("# Minha lista"));
 
-    notebook.complete_task("Inbox", &id).unwrap();
+    notebook.complete_task("Tasks/Inbox.md", &id).unwrap();
 }
 
 #[test]
@@ -166,7 +166,7 @@ fn a_line_copy_pasted_with_its_id_gets_a_fresh_one() {
     )
     .unwrap();
 
-    let tasks = notebook.tasks_in("Inbox").unwrap();
+    let tasks = notebook.tasks_in("Tasks/Inbox.md").unwrap();
 
     assert_eq!(tasks.len(), 2, "both lines must survive");
     let first = tasks[0].id.clone().unwrap();
@@ -175,8 +175,8 @@ fn a_line_copy_pasted_with_its_id_gets_a_fresh_one() {
     assert_ne!(second, first, "the second copy gets its own");
 
     // Both are now independently addressable.
-    notebook.complete_task("Inbox", &second).unwrap();
-    let left = notebook.tasks_in("Inbox").unwrap();
+    notebook.complete_task("Tasks/Inbox.md", &second).unwrap();
+    let left = notebook.tasks_in("Tasks/Inbox.md").unwrap();
     assert_eq!(left.len(), 1);
     assert_eq!(left[0].id.as_deref(), Some(first.as_str()));
 }
@@ -187,7 +187,7 @@ fn a_reference_keeps_pointing_at_the_task_it_was_created_for() {
     // then duplicate its line by hand.
     let dir = tempfile::tempdir().unwrap();
     let (notebook, id) = notebook_with_task(dir.path(), "Comprar leite");
-    notebook.pull_into(Period::Day, "Inbox", &id).unwrap();
+    notebook.pull_into(Period::Day, "Tasks/Inbox.md", &id).unwrap();
 
     let line = format!("- [ ] Comprar leite <!--id:{id}-->");
     std::fs::write(
@@ -196,7 +196,7 @@ fn a_reference_keeps_pointing_at_the_task_it_was_created_for() {
     )
     .unwrap();
 
-    let tasks = notebook.tasks_in("Inbox").unwrap();
+    let tasks = notebook.tasks_in("Tasks/Inbox.md").unwrap();
     assert_eq!(tasks.len(), 2);
     assert_eq!(
         tasks[0].id.as_deref(),
@@ -215,7 +215,7 @@ fn moving_a_task_into_a_list_that_already_uses_its_id() {
     // one. Completing both must not merge them into a single line.
     let dir = tempfile::tempdir().unwrap();
     let notebook = Notebook::init(dir.path()).unwrap();
-    notebook.create_list("Compras").unwrap();
+    notebook.create_list("Tasks", "Compras").unwrap();
 
     std::fs::write(
         dir.path().join("Tasks/Inbox.md"),
@@ -228,10 +228,10 @@ fn moving_a_task_into_a_list_that_already_uses_its_id() {
     )
     .unwrap();
 
-    notebook.complete_task("Inbox", "mesmo1").unwrap();
-    notebook.complete_task("Compras", "mesmo1").unwrap();
+    notebook.complete_task("Tasks/Inbox.md", "mesmo1").unwrap();
+    notebook.complete_task("Tasks/Compras.md", "mesmo1").unwrap();
 
-    let completed = notebook.tasks_in("Completed").unwrap();
+    let completed = notebook.tasks_in("Tasks/Completed.md").unwrap();
     assert_eq!(completed.len(), 2, "neither task may be swallowed");
 
     let ids: std::collections::HashSet<_> =
@@ -263,7 +263,7 @@ fn reading_a_read_only_notebook_does_not_adopt_ids() {
     .unwrap();
 
     let notebook = Notebook::open(dir.path()).unwrap();
-    let tasks = notebook.tasks_in("Inbox").unwrap();
+    let tasks = notebook.tasks_in("Tasks/Inbox.md").unwrap();
 
     assert_eq!(tasks.len(), 1);
     assert!(tasks[0].id.is_none(), "read-only must not write ids");
@@ -276,27 +276,27 @@ fn reading_a_read_only_notebook_does_not_adopt_ids() {
 fn renaming_a_list_repoints_completed_origins_and_states() {
     let dir = tempfile::tempdir().unwrap();
     let notebook = Notebook::init(dir.path()).unwrap();
-    notebook.create_list("Compras").unwrap();
+    notebook.create_list("Tasks", "Compras").unwrap();
 
-    let mut compras = notebook.open_list("Compras").unwrap();
+    let mut compras = notebook.open_list("Tasks/Compras.md").unwrap();
     let done_id = compras.add_text_with_id("Comprar leite");
     let pulled_id = compras.add_text_with_id("Comprar pão");
     compras.save().unwrap();
 
-    notebook.complete_task("Compras", &done_id).unwrap();
-    notebook.pull_into(Period::Day, "Compras", &pulled_id).unwrap();
+    notebook.complete_task("Tasks/Compras.md", &done_id).unwrap();
+    notebook.pull_into(Period::Day, "Tasks/Compras.md", &pulled_id).unwrap();
 
-    notebook.rename_list("Compras", "Mercado").unwrap();
+    notebook.rename_list("Tasks/Compras.md", "Mercado").unwrap();
 
     assert!(dir.path().join("Tasks/Mercado.md").is_file());
     assert!(!dir.path().join("Tasks/Compras.md").exists());
     assert!(read(dir.path().join("Tasks/Completed.md")).contains("origin:Mercado"));
 
     let state = notebook.open_state(Period::Day).unwrap();
-    assert!(state.state.contains("Mercado", &pulled_id));
+    assert!(state.state.contains("Tasks/Mercado.md", &pulled_id));
 
     // The undo still works, which is the whole point of repointing origins.
-    notebook.uncomplete_task(&done_id).unwrap();
+    notebook.uncomplete_task("Tasks/Completed.md", &done_id).unwrap();
     assert!(read(dir.path().join("Tasks/Mercado.md")).contains("Comprar leite"));
 }
 
@@ -305,13 +305,13 @@ fn default_lists_cannot_be_renamed_or_deleted() {
     let dir = tempfile::tempdir().unwrap();
     let notebook = Notebook::init(dir.path()).unwrap();
 
-    for name in ["Inbox", "Completed"] {
+    for path in ["Tasks/Inbox.md", "Tasks/Completed.md"] {
         assert!(matches!(
-            notebook.rename_list(name, "Outra").unwrap_err(),
+            notebook.rename_list(path, "Outra").unwrap_err(),
             Error::ProtectedList(_)
         ));
         assert!(matches!(
-            notebook.delete_list(name).unwrap_err(),
+            notebook.delete_list(path).unwrap_err(),
             Error::ProtectedList(_)
         ));
     }
@@ -321,10 +321,10 @@ fn default_lists_cannot_be_renamed_or_deleted() {
 fn renaming_onto_an_existing_list_is_refused() {
     let dir = tempfile::tempdir().unwrap();
     let notebook = Notebook::init(dir.path()).unwrap();
-    notebook.create_list("Compras").unwrap();
-    notebook.create_list("Mercado").unwrap();
+    notebook.create_list("Tasks", "Compras").unwrap();
+    notebook.create_list("Tasks", "Mercado").unwrap();
 
-    assert!(notebook.rename_list("Compras", "Mercado").is_err());
+    assert!(notebook.rename_list("Tasks/Compras.md", "Mercado").is_err());
     // Neither file was harmed.
     assert!(dir.path().join("Tasks/Compras.md").is_file());
     assert!(dir.path().join("Tasks/Mercado.md").is_file());
@@ -334,15 +334,15 @@ fn renaming_onto_an_existing_list_is_refused() {
 fn deleting_a_list_rescues_its_tasks_into_the_inbox() {
     let dir = tempfile::tempdir().unwrap();
     let notebook = Notebook::init(dir.path()).unwrap();
-    notebook.create_list("Compras").unwrap();
+    notebook.create_list("Tasks", "Compras").unwrap();
 
-    let mut compras = notebook.open_list("Compras").unwrap();
+    let mut compras = notebook.open_list("Tasks/Compras.md").unwrap();
     let id = compras.add_text_with_id("Comprar leite");
     compras.add_text("Comprar pão");
     compras.save().unwrap();
-    notebook.pull_into(Period::Day, "Compras", &id).unwrap();
+    notebook.pull_into(Period::Day, "Tasks/Compras.md", &id).unwrap();
 
-    let rescued = notebook.delete_list("Compras").unwrap();
+    let rescued = notebook.delete_list("Tasks/Compras.md").unwrap();
 
     assert_eq!(rescued, 2);
     assert!(!dir.path().join("Tasks/Compras.md").exists());
@@ -353,7 +353,7 @@ fn deleting_a_list_rescues_its_tasks_into_the_inbox() {
 
     // A task that was pulled into Today stays pulled, now via the Inbox.
     let state = notebook.open_state(Period::Day).unwrap();
-    assert!(state.state.contains("Inbox", &id));
+    assert!(state.state.contains("Tasks/Inbox.md", &id));
 }
 
 #[test]
@@ -363,14 +363,14 @@ fn deleting_a_list_rescues_tasks_that_never_earned_an_id() {
     // the file.
     let dir = tempfile::tempdir().unwrap();
     let notebook = Notebook::init(dir.path()).unwrap();
-    notebook.create_list("Compras").unwrap();
+    notebook.create_list("Tasks", "Compras").unwrap();
     std::fs::write(
         dir.path().join("Tasks/Compras.md"),
         "- [ ] sem id nenhum\n  @2026-07-25 #casa\n- [ ] outra sem id\n",
     )
     .unwrap();
 
-    let rescued = notebook.delete_list("Compras").unwrap();
+    let rescued = notebook.delete_list("Tasks/Compras.md").unwrap();
 
     assert_eq!(rescued, 2);
     let inbox = read(dir.path().join("Tasks/Inbox.md"));
@@ -397,7 +397,7 @@ fn pulling_a_task_writes_a_reference_not_a_copy() {
     let dir = tempfile::tempdir().unwrap();
     let (notebook, id) = notebook_with_task(dir.path(), "Comprar leite");
 
-    assert!(notebook.pull_into(Period::Week, "Inbox", &id).unwrap());
+    assert!(notebook.pull_into(Period::Week, "Tasks/Inbox.md", &id).unwrap());
 
     let state = read(dir.path().join(".memo/weekly-state.json"));
     assert!(state.contains(&id));
@@ -410,8 +410,8 @@ fn pulling_the_same_task_twice_is_idempotent() {
     let dir = tempfile::tempdir().unwrap();
     let (notebook, id) = notebook_with_task(dir.path(), "Comprar leite");
 
-    assert!(notebook.pull_into(Period::Day, "Inbox", &id).unwrap());
-    assert!(!notebook.pull_into(Period::Day, "Inbox", &id).unwrap());
+    assert!(notebook.pull_into(Period::Day, "Tasks/Inbox.md", &id).unwrap());
+    assert!(!notebook.pull_into(Period::Day, "Tasks/Inbox.md", &id).unwrap());
     assert_eq!(notebook.open_state(Period::Day).unwrap().state.len(), 1);
 }
 
@@ -420,7 +420,7 @@ fn pulling_a_task_that_does_not_exist_is_refused() {
     let dir = tempfile::tempdir().unwrap();
     let notebook = Notebook::init(dir.path()).unwrap();
 
-    let err = notebook.pull_into(Period::Day, "Inbox", "ghost").unwrap_err();
+    let err = notebook.pull_into(Period::Day, "Tasks/Inbox.md", "ghost").unwrap_err();
     assert!(matches!(err, Error::TaskNotFound(_)));
     assert!(!dir.path().join(".memo/daily-state.json").exists());
 }
@@ -430,8 +430,8 @@ fn removing_from_a_period_leaves_the_task_alone() {
     let dir = tempfile::tempdir().unwrap();
     let (notebook, id) = notebook_with_task(dir.path(), "Comprar leite");
 
-    notebook.pull_into(Period::Day, "Inbox", &id).unwrap();
-    assert!(notebook.remove_from(Period::Day, "Inbox", &id).unwrap());
+    notebook.pull_into(Period::Day, "Tasks/Inbox.md", &id).unwrap();
+    assert!(notebook.remove_from(Period::Day, "Tasks/Inbox.md", &id).unwrap());
 
     assert!(notebook.open_state(Period::Day).unwrap().state.is_empty());
     assert!(read(dir.path().join("Tasks/Inbox.md")).contains("Comprar leite"));
@@ -452,14 +452,14 @@ fn a_task_created_in_today_is_physically_written_to_the_inbox() {
     assert!(inbox.contains(&format!("id:{id}")));
 
     let state = notebook.open_state(Period::Day).unwrap();
-    assert!(state.state.contains("Inbox", &id));
+    assert!(state.state.contains("Tasks/Inbox.md", &id));
 }
 
 #[test]
 fn the_state_rolls_over_when_the_notebook_is_reopened_later() {
     let dir = tempfile::tempdir().unwrap();
     let (notebook, id) = notebook_with_task(dir.path(), "Comprar leite");
-    notebook.pull_into(Period::Day, "Inbox", &id).unwrap();
+    notebook.pull_into(Period::Day, "Tasks/Inbox.md", &id).unwrap();
 
     // Simulate the app having been closed since an old day, by rewriting the
     // state's date the way it would look on disk.
@@ -488,7 +488,7 @@ fn carry_mode_keeps_the_pulled_tasks_across_the_turn() {
     config.rollover.daily.mode = RolloverMode::Carry;
     notebook.set_config(config).unwrap();
 
-    notebook.pull_into(Period::Day, "Inbox", &id).unwrap();
+    notebook.pull_into(Period::Day, "Tasks/Inbox.md", &id).unwrap();
 
     let path = dir.path().join(".memo/daily-state.json");
     let mut state: serde_json::Value = serde_json::from_str(&read(&path)).unwrap();
@@ -498,7 +498,7 @@ fn carry_mode_keeps_the_pulled_tasks_across_the_turn() {
     let reopened = Notebook::open(dir.path()).unwrap();
     let rolled = reopened.open_state(Period::Day).unwrap();
 
-    assert!(rolled.state.contains("Inbox", &id));
+    assert!(rolled.state.contains("Tasks/Inbox.md", &id));
     assert_eq!(rolled.state.date, reopened.today());
 }
 
@@ -508,18 +508,18 @@ fn carry_mode_keeps_the_pulled_tasks_across_the_turn() {
 fn the_day_suggests_the_week_first_then_the_other_lists() {
     let dir = tempfile::tempdir().unwrap();
     let notebook = Notebook::init(dir.path()).unwrap();
-    notebook.create_list("Compras").unwrap();
+    notebook.create_list("Tasks", "Compras").unwrap();
 
     let mut inbox = notebook.inbox().unwrap();
     let solta = inbox.add_text_with_id("Tarefa solta");
     inbox.save().unwrap();
 
-    let mut compras = notebook.open_list("Compras").unwrap();
+    let mut compras = notebook.open_list("Tasks/Compras.md").unwrap();
     let da_semana = compras.add_text_with_id("Escolhida pra semana");
     compras.save().unwrap();
 
     notebook
-        .pull_into(Period::Week, "Compras", &da_semana)
+        .pull_into(Period::Week, "Tasks/Compras.md", &da_semana)
         .unwrap();
 
     let suggestions = notebook.suggestions_for(Period::Day).unwrap();
@@ -530,7 +530,7 @@ fn the_day_suggests_the_week_first_then_the_other_lists() {
 
     // What the user already chose for the week comes first.
     assert_eq!(ids, vec![da_semana.clone(), solta]);
-    assert_eq!(suggestions[0].list, "Compras");
+    assert_eq!(suggestions[0].path, "Tasks/Compras.md");
 }
 
 #[test]
@@ -539,7 +539,7 @@ fn a_task_already_pulled_is_not_suggested_again() {
     let (notebook, id) = notebook_with_task(dir.path(), "Comprar leite");
 
     assert_eq!(notebook.suggestions_for(Period::Day).unwrap().len(), 1);
-    notebook.pull_into(Period::Day, "Inbox", &id).unwrap();
+    notebook.pull_into(Period::Day, "Tasks/Inbox.md", &id).unwrap();
     assert!(notebook.suggestions_for(Period::Day).unwrap().is_empty());
 }
 
@@ -548,7 +548,7 @@ fn completed_tasks_are_never_suggested() {
     let dir = tempfile::tempdir().unwrap();
     let (notebook, id) = notebook_with_task(dir.path(), "Comprar leite");
 
-    notebook.complete_task("Inbox", &id).unwrap();
+    notebook.complete_task("Tasks/Inbox.md", &id).unwrap();
 
     assert!(notebook.suggestions_for(Period::Day).unwrap().is_empty());
     assert!(notebook.suggestions_for(Period::Week).unwrap().is_empty());
@@ -561,7 +561,7 @@ fn the_week_suggests_from_the_lists_only() {
     let dir = tempfile::tempdir().unwrap();
     let (notebook, id) = notebook_with_task(dir.path(), "Comprar leite");
 
-    notebook.pull_into(Period::Day, "Inbox", &id).unwrap();
+    notebook.pull_into(Period::Day, "Tasks/Inbox.md", &id).unwrap();
 
     let week = notebook.suggestions_for(Period::Week).unwrap();
     assert_eq!(week.len(), 1);
@@ -572,16 +572,16 @@ fn the_week_suggests_from_the_lists_only() {
 fn period_tasks_resolves_references_to_real_tasks() {
     let dir = tempfile::tempdir().unwrap();
     let notebook = Notebook::init(dir.path()).unwrap();
-    notebook.create_list("Compras").unwrap();
+    notebook.create_list("Tasks", "Compras").unwrap();
 
-    let mut compras = notebook.open_list("Compras").unwrap();
+    let mut compras = notebook.open_list("Tasks/Compras.md").unwrap();
     let id = compras.add_text_with_id("Comprar leite");
     compras.save().unwrap();
-    notebook.pull_into(Period::Day, "Compras", &id).unwrap();
+    notebook.pull_into(Period::Day, "Tasks/Compras.md", &id).unwrap();
 
     let pulled = notebook.period_tasks(Period::Day).unwrap();
     assert_eq!(pulled.len(), 1);
-    assert_eq!(pulled[0].list, "Compras");
+    assert_eq!(pulled[0].path, "Tasks/Compras.md");
     assert_eq!(pulled[0].task.text, "Comprar leite");
 }
 
@@ -590,7 +590,7 @@ fn a_reference_to_a_task_deleted_elsewhere_is_skipped() {
     // The notebook is shared with other editors; a stale reference is normal.
     let dir = tempfile::tempdir().unwrap();
     let (notebook, id) = notebook_with_task(dir.path(), "Comprar leite");
-    notebook.pull_into(Period::Day, "Inbox", &id).unwrap();
+    notebook.pull_into(Period::Day, "Tasks/Inbox.md", &id).unwrap();
 
     // Someone deletes the line in Obsidian.
     std::fs::write(dir.path().join("Tasks/Inbox.md"), "").unwrap();
@@ -726,7 +726,7 @@ fn completing_a_repeating_task_leaves_the_next_one_behind() {
     )
     .unwrap();
 
-    notebook.complete_task("Inbox", "rent01").unwrap();
+    notebook.complete_task("Tasks/Inbox.md", "rent01").unwrap();
 
     // The finished one moved out, with its date and tag intact...
     let completed = read(dir.path().join("Tasks/Completed.md"));
@@ -750,9 +750,9 @@ fn completing_a_normal_task_leaves_nothing_behind() {
     let dir = tempfile::tempdir().unwrap();
     let (notebook, id) = notebook_with_task(dir.path(), "Comprar leite");
 
-    notebook.complete_task("Inbox", &id).unwrap();
+    notebook.complete_task("Tasks/Inbox.md", &id).unwrap();
 
-    assert!(notebook.tasks_in("Inbox").unwrap().is_empty());
+    assert!(notebook.tasks_in("Tasks/Inbox.md").unwrap().is_empty());
 }
 
 // ------------------------------------------------------------- contagem
@@ -761,20 +761,20 @@ fn completing_a_normal_task_leaves_nothing_behind() {
 fn counts_only_the_open_tasks_of_each_list() {
     let dir = tempfile::tempdir().unwrap();
     let notebook = Notebook::init(dir.path()).unwrap();
-    notebook.create_list("Compras").unwrap();
+    notebook.create_list("Tasks", "Compras").unwrap();
 
-    let mut compras = notebook.open_list("Compras").unwrap();
+    let mut compras = notebook.open_list("Tasks/Compras.md").unwrap();
     compras.add_text("Comprar leite");
     let done = compras.add_text_with_id("Comprar pão");
     compras.save().unwrap();
-    notebook.complete_task("Compras", &done).unwrap();
+    notebook.complete_task("Tasks/Compras.md", &done).unwrap();
 
     let counts = notebook.open_task_counts().unwrap();
 
-    assert_eq!(counts.get("Compras"), Some(&1), "só a tarefa em aberto");
-    assert_eq!(counts.get("Inbox"), Some(&0));
+    assert_eq!(counts.get("Tasks/Compras.md"), Some(&1), "só a tarefa em aberto");
+    assert_eq!(counts.get("Tasks/Inbox.md"), Some(&0));
     assert_eq!(
-        counts.get("Completed"),
+        counts.get("Tasks/Completed.md"),
         None,
         "a lista de concluídas não tem contagem — tudo nela está feito"
     );
@@ -789,7 +789,7 @@ fn counting_does_not_write_to_the_notebook() {
     let original = "- [ ] escrita à mão, sem id\n";
     std::fs::write(dir.path().join("Tasks/Inbox.md"), original).unwrap();
 
-    assert_eq!(notebook.open_task_counts().unwrap().get("Inbox"), Some(&1));
+    assert_eq!(notebook.open_task_counts().unwrap().get("Tasks/Inbox.md"), Some(&1));
     assert_eq!(read(dir.path().join("Tasks/Inbox.md")), original);
 }
 
@@ -827,7 +827,8 @@ fn a_conflict_copy_is_not_shown_as_a_list() {
     let notebook = Notebook::init(dir.path()).unwrap();
     write_conflict(dir.path(), "Inbox", "- [ ] versão do celular\n");
 
-    assert_eq!(notebook.list_names().unwrap(), vec!["Completed", "Inbox"]);
+    let names: Vec<String> = notebook.lists().unwrap().into_iter().map(|l| l.name).collect();
+    assert_eq!(names, vec!["Completed", "Inbox"]);
 }
 
 #[test]
@@ -852,7 +853,7 @@ fn conflicts_are_reported_with_the_list_they_belong_to() {
 fn a_notebook_without_conflicts_reports_none() {
     let dir = tempfile::tempdir().unwrap();
     let notebook = Notebook::init(dir.path()).unwrap();
-    notebook.create_list("Compras").unwrap();
+    notebook.create_list("Tasks", "Compras").unwrap();
 
     assert!(notebook.conflicts().unwrap().is_empty());
 }
@@ -882,7 +883,7 @@ fn the_conflicting_copy_is_left_untouched() {
     let path = write_conflict(dir.path(), "Inbox", "- [ ] versão do celular\n");
 
     notebook.conflicts().unwrap();
-    notebook.tasks_in("Inbox").unwrap();
+    notebook.tasks_in("Tasks/Inbox.md").unwrap();
 
     assert_eq!(read(&path), "- [ ] versão do celular\n");
 }
@@ -908,11 +909,11 @@ fn a_notebook_from_a_newer_app_refuses_every_write() {
     assert_eq!(notebook.inbox().unwrap().tasks().count(), 1);
 
     // Writing does not, so a newer app's fields are never destroyed.
-    assert!(notebook.complete_task("Inbox", &id).is_err());
-    assert!(notebook.create_list("Compras").is_err());
-    assert!(notebook.pull_into(Period::Day, "Inbox", &id).is_err());
+    assert!(notebook.complete_task("Tasks/Inbox.md", &id).is_err());
+    assert!(notebook.create_list("Tasks", "Compras").is_err());
+    assert!(notebook.pull_into(Period::Day, "Tasks/Inbox.md", &id).is_err());
     assert!(notebook.add_task_in_period(Period::Day, "nova").is_err());
-    assert!(notebook.delete_list("Compras").is_err());
+    assert!(notebook.delete_list("Tasks/Compras.md").is_err());
 
     // And the unknown key is still on disk, untouched.
     assert!(read(dir.path().join(".memo/config.json")).contains("somethingNew"));
@@ -926,33 +927,33 @@ fn the_whole_phase_two_scenario_end_to_end() {
     // day → complete → undo, checked against the files.
     let dir = tempfile::tempdir().unwrap();
     let notebook = Notebook::init(dir.path()).unwrap();
-    notebook.create_list("Compras").unwrap();
+    notebook.create_list("Tasks", "Compras").unwrap();
 
-    let mut compras = notebook.open_list("Compras").unwrap();
+    let mut compras = notebook.open_list("Tasks/Compras.md").unwrap();
     let id = compras.add_text_with_id("Comprar leite");
     compras.save().unwrap();
 
-    notebook.pull_into(Period::Week, "Compras", &id).unwrap();
-    notebook.pull_into(Period::Day, "Compras", &id).unwrap();
+    notebook.pull_into(Period::Week, "Tasks/Compras.md", &id).unwrap();
+    notebook.pull_into(Period::Day, "Tasks/Compras.md", &id).unwrap();
 
     assert!(notebook
         .open_state(Period::Week)
         .unwrap()
         .state
-        .contains("Compras", &id));
+        .contains("Tasks/Compras.md", &id));
     assert!(notebook
         .open_state(Period::Day)
         .unwrap()
         .state
-        .contains("Compras", &id));
+        .contains("Tasks/Compras.md", &id));
 
-    notebook.complete_task("Compras", &id).unwrap();
+    notebook.complete_task("Tasks/Compras.md", &id).unwrap();
 
     assert!(read(dir.path().join("Tasks/Completed.md")).contains("- [x] Comprar leite"));
     assert!(notebook.open_state(Period::Day).unwrap().state.is_empty());
     assert!(notebook.open_state(Period::Week).unwrap().state.is_empty());
 
-    notebook.uncomplete_task(&id).unwrap();
+    notebook.uncomplete_task("Tasks/Completed.md", &id).unwrap();
 
     let compras = TaskList::load(dir.path().join("Tasks/Compras.md")).unwrap();
     let task = compras.find(&id).unwrap();
@@ -970,13 +971,13 @@ fn the_whole_phase_two_scenario_end_to_end() {
 fn completing_and_undoing_in_a_spaced_list_round_trips() {
     let dir = tempfile::tempdir().unwrap();
     let notebook = memo_core::Notebook::init(dir.path()).unwrap();
-    notebook.create_list("Meu Mercado").unwrap();
+    notebook.create_list("Tasks", "Meu Mercado").unwrap();
 
-    let mut list = notebook.open_list("Meu Mercado").unwrap();
+    let mut list = notebook.open_list("Tasks/Meu Mercado.md").unwrap();
     let id = list.add_text_with_id("Comprar arroz");
     list.save().unwrap();
 
-    notebook.complete_task("Meu Mercado", &id).unwrap();
+    notebook.complete_task("Tasks/Meu Mercado.md", &id).unwrap();
     let completed =
         std::fs::read_to_string(dir.path().join("Tasks/Completed.md")).unwrap();
     assert!(
@@ -984,8 +985,8 @@ fn completing_and_undoing_in_a_spaced_list_round_trips() {
         "the spaced origin must be quoted on disk: {completed}"
     );
 
-    notebook.uncomplete_task(&id).unwrap();
-    let back = notebook.open_list("Meu Mercado").unwrap();
+    notebook.uncomplete_task("Tasks/Completed.md", &id).unwrap();
+    let back = notebook.open_list("Tasks/Meu Mercado.md").unwrap();
     assert!(
         back.find(&id).is_some(),
         "undo must land in the original spaced list"
@@ -1004,7 +1005,7 @@ fn a_quote_in_a_list_name_is_refused() {
     let dir = tempfile::tempdir().unwrap();
     let notebook = memo_core::Notebook::init(dir.path()).unwrap();
     assert!(matches!(
-        notebook.create_list("Mi\"casa"),
+        notebook.create_list("Tasks", "Mi\"casa"),
         Err(memo_core::Error::InvalidListName(_))
     ));
 }

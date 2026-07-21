@@ -39,16 +39,22 @@ impl Period {
 }
 
 /// A pointer to a task that lives in a list.
+///
+/// `path` is the list's file, **relative to the notebook root**
+/// (`Tasks/Inbox.md`) — never a bare name. With more than one folder of
+/// tasks there are two lists called `Inbox`, and a name stops identifying
+/// anything (phase 7). The states live in `.memo/`, which stays with the
+/// notebook, so the notebook root is the natural anchor.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskRef {
-    pub list: String,
+    pub path: String,
     pub id: String,
 }
 
 impl TaskRef {
-    pub fn new(list: impl Into<String>, id: impl Into<String>) -> Self {
+    pub fn new(path: impl Into<String>, id: impl Into<String>) -> Self {
         Self {
-            list: list.into(),
+            path: path.into(),
             id: id.into(),
         }
     }
@@ -79,15 +85,15 @@ impl PeriodState {
         self.items.len()
     }
 
-    pub fn contains(&self, list: &str, id: &str) -> bool {
-        self.items.iter().any(|r| r.list == list && r.id == id)
+    pub fn contains(&self, path: &str, id: &str) -> bool {
+        self.items.iter().any(|r| r.path == path && r.id == id)
     }
 
     /// Pulls a task into the period. Idempotent: pulling twice is a no-op
     /// rather than a duplicate, since the UI can fire the same action twice.
     /// Returns whether anything changed.
-    pub fn add(&mut self, list: impl Into<String>, id: impl Into<String>) -> bool {
-        let reference = TaskRef::new(list, id);
+    pub fn add(&mut self, path: impl Into<String>, id: impl Into<String>) -> bool {
+        let reference = TaskRef::new(path, id);
         if self.items.contains(&reference) {
             return false;
         }
@@ -96,9 +102,9 @@ impl PeriodState {
     }
 
     /// Removes a reference. Returns whether anything changed.
-    pub fn remove(&mut self, list: &str, id: &str) -> bool {
+    pub fn remove(&mut self, path: &str, id: &str) -> bool {
         let before = self.items.len();
-        self.items.retain(|r| !(r.list == list && r.id == id));
+        self.items.retain(|r| !(r.path == path && r.id == id));
         before != self.items.len()
     }
 
@@ -111,12 +117,12 @@ impl PeriodState {
         before != self.items.len()
     }
 
-    /// Repoints references after a list is renamed.
-    pub fn rename_list(&mut self, from: &str, to: &str) -> bool {
+    /// Repoints references after a list is renamed or its tasks moved.
+    pub fn rename_path(&mut self, from: &str, to: &str) -> bool {
         let mut changed = false;
         for reference in &mut self.items {
-            if reference.list == from {
-                reference.list = to.to_string();
+            if reference.path == from {
+                reference.path = to.to_string();
                 changed = true;
             }
         }
@@ -124,9 +130,9 @@ impl PeriodState {
     }
 
     /// Drops every reference into a list, used when the list is deleted.
-    pub fn remove_list(&mut self, list: &str) -> bool {
+    pub fn remove_path(&mut self, path: &str) -> bool {
         let before = self.items.len();
-        self.items.retain(|r| r.list != list);
+        self.items.retain(|r| r.path != path);
         before != self.items.len()
     }
 }
@@ -193,20 +199,20 @@ mod tests {
     fn adds_and_removes_references() {
         let mut state = PeriodState::new(ymd(2026, 7, 20));
 
-        assert!(state.add("Compras", "g7h8i9"));
-        assert!(state.contains("Compras", "g7h8i9"));
+        assert!(state.add("Tasks/Compras.md", "g7h8i9"));
+        assert!(state.contains("Tasks/Compras.md", "g7h8i9"));
         assert_eq!(state.len(), 1);
 
-        assert!(state.remove("Compras", "g7h8i9"));
+        assert!(state.remove("Tasks/Compras.md", "g7h8i9"));
         assert!(state.is_empty());
-        assert!(!state.remove("Compras", "g7h8i9"));
+        assert!(!state.remove("Tasks/Compras.md", "g7h8i9"));
     }
 
     #[test]
     fn pulling_the_same_task_twice_does_not_duplicate_it() {
         let mut state = PeriodState::new(ymd(2026, 7, 20));
-        assert!(state.add("Inbox", "abc123"));
-        assert!(!state.add("Inbox", "abc123"));
+        assert!(state.add("Tasks/Inbox.md", "abc123"));
+        assert!(!state.add("Tasks/Inbox.md", "abc123"));
         assert_eq!(state.len(), 1);
     }
 
@@ -215,47 +221,47 @@ mod tests {
         // Ids are unique per file, not globally — the format lets a hand-copied
         // line carry the same id into another list.
         let mut state = PeriodState::new(ymd(2026, 7, 20));
-        state.add("Inbox", "abc123");
-        state.add("Compras", "abc123");
+        state.add("Tasks/Inbox.md", "abc123");
+        state.add("Tasks/Compras.md", "abc123");
         assert_eq!(state.len(), 2);
 
-        assert!(state.remove("Inbox", "abc123"));
+        assert!(state.remove("Tasks/Inbox.md", "abc123"));
         assert_eq!(state.len(), 1);
     }
 
     #[test]
     fn remove_id_drops_every_reference_to_a_task() {
         let mut state = PeriodState::new(ymd(2026, 7, 20));
-        state.add("Inbox", "abc123");
-        state.add("Compras", "abc123");
-        state.add("Compras", "other");
+        state.add("Tasks/Inbox.md", "abc123");
+        state.add("Tasks/Compras.md", "abc123");
+        state.add("Tasks/Compras.md", "other");
 
         assert!(state.remove_id("abc123"));
         assert_eq!(state.len(), 1);
-        assert!(state.contains("Compras", "other"));
+        assert!(state.contains("Tasks/Compras.md", "other"));
     }
 
     #[test]
     fn renaming_a_list_repoints_its_references() {
         let mut state = PeriodState::new(ymd(2026, 7, 20));
-        state.add("Compras", "a");
-        state.add("Inbox", "b");
+        state.add("Tasks/Compras.md", "a");
+        state.add("Tasks/Inbox.md", "b");
 
-        assert!(state.rename_list("Compras", "Mercado"));
-        assert!(state.contains("Mercado", "a"));
-        assert!(state.contains("Inbox", "b"));
-        assert!(!state.rename_list("Compras", "Mercado"));
+        assert!(state.rename_path("Tasks/Compras.md", "Tasks/Mercado.md"));
+        assert!(state.contains("Tasks/Mercado.md", "a"));
+        assert!(state.contains("Tasks/Inbox.md", "b"));
+        assert!(!state.rename_path("Tasks/Compras.md", "Tasks/Mercado.md"));
     }
 
     #[test]
     fn deleting_a_list_drops_its_references() {
         let mut state = PeriodState::new(ymd(2026, 7, 20));
-        state.add("Compras", "a");
-        state.add("Inbox", "b");
+        state.add("Tasks/Compras.md", "a");
+        state.add("Tasks/Inbox.md", "b");
 
-        assert!(state.remove_list("Compras"));
+        assert!(state.remove_path("Tasks/Compras.md"));
         assert_eq!(state.len(), 1);
-        assert!(state.contains("Inbox", "b"));
+        assert!(state.contains("Tasks/Inbox.md", "b"));
     }
 
     #[test]
@@ -264,18 +270,18 @@ mod tests {
         let path = dir.path().join(Period::Day.file_name());
 
         let mut file = StateFile::load(&path, ymd(2026, 7, 20));
-        file.state.add("Compras", "g7h8i9");
+        file.state.add("Tasks/Compras.md", "g7h8i9");
         file.save().unwrap();
 
         let reloaded = StateFile::load(&path, ymd(1970, 1, 1));
         assert_eq!(reloaded.state.date, ymd(2026, 7, 20));
-        assert_eq!(reloaded.state.items, vec![TaskRef::new("Compras", "g7h8i9")]);
+        assert_eq!(reloaded.state.items, vec![TaskRef::new("Tasks/Compras.md", "g7h8i9")]);
     }
 
     #[test]
     fn serializes_in_the_documented_shape() {
         let mut state = PeriodState::new(ymd(2026, 7, 17));
-        state.add("Compras", "g7h8i9");
+        state.add("Tasks/Compras.md", "g7h8i9");
 
         let json: serde_json::Value =
             serde_json::from_str(&serde_json::to_string(&state).unwrap()).unwrap();
@@ -284,7 +290,7 @@ mod tests {
             json,
             serde_json::json!({
                 "date": "2026-07-17",
-                "items": [{ "list": "Compras", "id": "g7h8i9" }]
+                "items": [{ "path": "Tasks/Compras.md", "id": "g7h8i9" }]
             })
         );
     }

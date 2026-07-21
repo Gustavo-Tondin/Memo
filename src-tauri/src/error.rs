@@ -38,6 +38,7 @@ impl From<memo_core::Error> for CommandError {
             Error::Io { .. } => "io",
             Error::NotANotebook(_) => "notANotebook",
             Error::NotAWorkspace(_) => "notAWorkspace",
+            Error::LegacyNotebook(_) => "legacyNotebook",
             Error::AlreadyANotebook(_) => "alreadyANotebook",
             Error::TaskNotFound(_) => "taskNotFound",
             Error::InvalidListName(_) => "invalidListName",

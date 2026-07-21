@@ -17,17 +17,23 @@ use tauri_plugin_dialog::DialogExt;
 use crate::error::CommandResult;
 use crate::state::AppState;
 
-/// The names the core creates, so the frontend never hard-codes them.
+/// The addresses the core creates, so the frontend never hard-codes them.
 ///
 /// The frontend used to mirror these in a `names.js` — and when the core
 /// renamed `Completas` to `Completed` in phase 5, the completed screen kept
 /// reading a file that no longer existed and showed "nothing done yet"
 /// forever. Coming over the bridge, a rename reaches every screen at once.
+///
+/// Since phase 7 these are **paths**, not names: `Tasks/Inbox.md`.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NotebookLayout {
+    /// Where quick-captured tasks land.
     pub inbox: String,
+    /// The fixed workspace's completed list.
     pub completed: String,
+    /// The folder new lists are created in, until the UI is workspace-aware.
+    pub tasks_folder: String,
 }
 
 /// What the frontend needs to know about the open notebook.
@@ -38,7 +44,9 @@ pub struct NotebookInfo {
     /// Folder name, which is what the user recognizes as the notebook's name.
     pub name: String,
     pub read_only: bool,
-    pub lists: Vec<String>,
+    /// Every list as `{ path, name }` — the path is the address commands
+    /// take, the name is what the user reads.
+    pub lists: Vec<memo_core::notebook::ListEntry>,
     pub layout: NotebookLayout,
 }
 
@@ -52,10 +60,11 @@ impl NotebookInfo {
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_default(),
             read_only: notebook.is_read_only(),
-            lists: notebook.list_names()?,
+            lists: notebook.lists()?,
             layout: NotebookLayout {
-                inbox: memo_core::INBOX_LIST.to_string(),
-                completed: memo_core::COMPLETED_LIST.to_string(),
+                inbox: Notebook::inbox_path(),
+                completed: Notebook::completed_path_of(&Notebook::inbox_path())?,
+                tasks_folder: memo_core::TASKS_DIR.to_string(),
             },
         })
     }
@@ -264,8 +273,8 @@ pub fn set_notebook_settings(
 // ------------------------------------------------------------------ lists
 
 #[tauri::command]
-pub fn list_names(state: State<'_, AppState>) -> CommandResult<Vec<String>> {
-    state.with_notebook(|nb| Ok(nb.list_names()?))
+pub fn list_names(state: State<'_, AppState>) -> CommandResult<Vec<memo_core::notebook::ListEntry>> {
+    state.with_notebook(|nb| Ok(nb.lists()?))
 }
 
 /// Conflicting copies a sync tool left in the notebook.
@@ -282,10 +291,17 @@ pub fn list_tasks(state: State<'_, AppState>, list: String) -> CommandResult<Vec
     state.with_notebook(|nb| Ok(nb.tasks_in(&list)?))
 }
 
+/// Creates a list inside `folder` (a root-relative workspace folder, e.g.
+/// `Tasks` — the UI takes it from `layout.tasksFolder` until it is
+/// workspace-aware).
 #[tauri::command]
-pub fn create_list(state: State<'_, AppState>, name: String) -> CommandResult<()> {
+pub fn create_list(
+    state: State<'_, AppState>,
+    folder: String,
+    name: String,
+) -> CommandResult<()> {
     state.with_notebook(|nb| {
-        nb.create_list(&name)?;
+        nb.create_list(&folder, &name)?;
         Ok(())
     })
 }
@@ -479,9 +495,16 @@ pub fn complete_task(
     state.with_notebook(|nb| Ok(nb.complete_task(&list, &id)?))
 }
 
+/// Un-completes a task. `list` is the address of the Completed list it sits
+/// in — with one Completed per widget, the id alone cannot say which folder
+/// to undo in.
 #[tauri::command]
-pub fn uncomplete_task(state: State<'_, AppState>, id: String) -> CommandResult<Task> {
-    state.with_notebook(|nb| Ok(nb.uncomplete_task(&id)?))
+pub fn uncomplete_task(
+    state: State<'_, AppState>,
+    list: String,
+    id: String,
+) -> CommandResult<Task> {
+    state.with_notebook(|nb| Ok(nb.uncomplete_task(&list, &id)?))
 }
 
 // --------------------------------------------------------- day and week

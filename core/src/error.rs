@@ -18,6 +18,14 @@ pub enum Error {
     #[error("{0} is not a workspace")]
     NotAWorkspace(PathBuf),
 
+    /// A notebook in the pre-phase-7 layout. Refused with a clear message
+    /// instead of converted: no migrations before v1 (decision 2026-07-21).
+    #[error(
+        "{0} was created by an older version of Memo and uses a layout this \
+         build no longer reads; create a new notebook"
+    )]
+    LegacyNotebook(PathBuf),
+
     /// A widget's `folder` tried to escape its workspace, or is malformed.
     /// The config file is user input, same as a list name.
     #[error("invalid widget folder {0:?}")]

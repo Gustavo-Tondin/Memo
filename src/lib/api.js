@@ -22,7 +22,9 @@ export const api = {
   listCounts: () => invoke("list_counts"),
   listConflicts: () => invoke("list_conflicts"),
   listTasks: (list) => invoke("list_tasks", { list }),
-  createList: (name) => invoke("create_list", { name }),
+  // `folder` is a workspace folder ("Tasks"); the UI takes it from
+  // layout.tasksFolder until it is workspace-aware.
+  createList: (folder, name) => invoke("create_list", { folder, name }),
   renameList: (from, to) => invoke("rename_list", { from, to }),
   deleteList: (name) => invoke("delete_list", { name }),
 
@@ -36,7 +38,8 @@ export const api = {
   moveTaskTo: (list, from, to) => invoke("move_task_to", { list, from, to }),
   ensureTaskId: (list, position) => invoke("ensure_task_id", { list, position }),
   completeTask: (list, id) => invoke("complete_task", { list, id }),
-  uncompleteTask: (id) => invoke("uncomplete_task", { id }),
+  // `list` is the Completed list the task sits in — one per widget.
+  uncompleteTask: (list, id) => invoke("uncomplete_task", { list, id }),
 
   // day and week
   periodTasks: (period) => invoke("period_tasks", { period }),

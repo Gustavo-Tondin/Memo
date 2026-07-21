@@ -2,6 +2,7 @@
   // A single task list (Inbox, Compras, …).
   import { api } from "./api.js";
   import { ensureTaskId } from "./taskId.js";
+  import { listName } from "./paths.js";
   import TaskRow from "./TaskRow.svelte";
 
   let {
@@ -66,7 +67,7 @@
   const edit = (l, id, text) => act(() => api.editTaskText(l, id, text));
 </script>
 
-<h2>{list}</h2>
+<h2>{listName(list)}</h2>
 
 {#if tasks.length === 0}
   <p class="empty">Nenhuma tarefa nesta lista.</p>

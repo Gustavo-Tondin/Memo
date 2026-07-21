@@ -10,7 +10,7 @@
     onChanged,
     onError,
     reloadKey,
-    completedList = "Completed",
+    completedList = "Tasks/Completed.md",
   } = $props();
 
   let tasks = $state([]);
@@ -32,7 +32,7 @@
 
   async function uncomplete(id) {
     try {
-      await api.uncompleteTask(id);
+      await api.uncompleteTask(completedList, id);
       await load();
       onChanged();
     } catch (e) {

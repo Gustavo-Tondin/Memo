@@ -1,4 +1,6 @@
 <script>
+  import { listName } from "./paths.js";
+
   // One task line. Knows how to render and edit itself; every action is a
   // callback, so the screen above decides what completing means.
   //
@@ -104,7 +106,7 @@
       <span class="sub">{doneSubtasks}/{task.subtasks.length}</span>
     {/if}
     {#each task.tags ?? [] as tag}<span class="tag">#{tag}</span>{/each}
-    {#if showList}<span class="list">{list}</span>{/if}
+    {#if showList}<span class="list">{listName(list)}</span>{/if}
   </li>
 {/if}
 

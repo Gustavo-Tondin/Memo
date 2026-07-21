@@ -48,18 +48,18 @@ describe("ListView", () => {
     bridge({ list_tasks: [task("a1", "Comprar leite")] });
 
     render(ListView, {
-      props: { list: "Compras", readOnly: false, onChanged: noop, onError: noop, reloadKey: 0 },
+      props: { list: "Tasks/Compras.md", readOnly: false, onChanged: noop, onError: noop, reloadKey: 0 },
     });
 
     expect(await screen.findByText("Comprar leite")).toBeTruthy();
-    expect(invoke).toHaveBeenCalledWith("list_tasks", { list: "Compras" });
+    expect(invoke).toHaveBeenCalledWith("list_tasks", { list: "Tasks/Compras.md" });
   });
 
   test("adding a task calls create_task and reloads", async () => {
     bridge({ list_tasks: [], create_task: "novo" });
 
     render(ListView, {
-      props: { list: "Inbox", readOnly: false, onChanged: noop, onError: noop, reloadKey: 0 },
+      props: { list: "Tasks/Inbox.md", readOnly: false, onChanged: noop, onError: noop, reloadKey: 0 },
     });
 
     await userEvent.type(await screen.findByPlaceholderText("Nova tarefa…"), "Ligar pro dentista");
@@ -67,7 +67,7 @@ describe("ListView", () => {
 
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("create_task", {
-        list: "Inbox",
+        list: "Tasks/Inbox.md",
         text: "Ligar pro dentista",
       }),
     );
@@ -79,13 +79,13 @@ describe("ListView", () => {
     bridge({ list_tasks: [task("a1", "Comprar leite")], complete_task: {} });
 
     render(ListView, {
-      props: { list: "Compras", readOnly: false, onChanged: noop, onError: noop, reloadKey: 0 },
+      props: { list: "Tasks/Compras.md", readOnly: false, onChanged: noop, onError: noop, reloadKey: 0 },
     });
 
     await userEvent.click(await screen.findByLabelText("concluir"));
 
     await waitFor(() =>
-      expect(invoke).toHaveBeenCalledWith("complete_task", { list: "Compras", id: "a1" }),
+      expect(invoke).toHaveBeenCalledWith("complete_task", { list: "Tasks/Compras.md", id: "a1" }),
     );
   });
 
@@ -93,7 +93,7 @@ describe("ListView", () => {
     bridge({ list_tasks: [task("a1", "Comprar leite")], pull_into_period: true });
 
     render(ListView, {
-      props: { list: "Compras", readOnly: false, onChanged: noop, onError: noop, reloadKey: 0 },
+      props: { list: "Tasks/Compras.md", readOnly: false, onChanged: noop, onError: noop, reloadKey: 0 },
     });
 
     await userEvent.click(await screen.findByText("→ Semana"));
@@ -101,7 +101,7 @@ describe("ListView", () => {
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("pull_into_period", {
         period: "week",
-        list: "Compras",
+        list: "Tasks/Compras.md",
         id: "a1",
       }),
     );
@@ -116,7 +116,7 @@ describe("ListView", () => {
     });
 
     render(ListView, {
-      props: { list: "Inbox", readOnly: true, onChanged: noop, onError: noop, reloadKey: 0 },
+      props: { list: "Tasks/Inbox.md", readOnly: true, onChanged: noop, onError: noop, reloadKey: 0 },
     });
 
     await waitFor(() =>
@@ -136,14 +136,14 @@ describe("ListView", () => {
     });
 
     render(ListView, {
-      props: { list: "Compras", readOnly: false, onChanged: noop, onError: noop, reloadKey: 0 },
+      props: { list: "Tasks/Compras.md", readOnly: false, onChanged: noop, onError: noop, reloadKey: 0 },
     });
 
     await userEvent.click(await screen.findByLabelText("concluir"));
 
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("complete_task", {
-        list: "Compras",
+        list: "Tasks/Compras.md",
         id: "new1",
       }),
     );
@@ -159,7 +159,7 @@ describe("ListView", () => {
     });
 
     render(ListView, {
-      props: { list: "Compras", readOnly: false, onChanged: noop, onError: noop, reloadKey: 0 },
+      props: { list: "Tasks/Compras.md", readOnly: false, onChanged: noop, onError: noop, reloadKey: 0 },
     });
 
     await userEvent.click(await screen.findByText("→ Hoje"));
@@ -167,7 +167,7 @@ describe("ListView", () => {
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("pull_into_period", {
         period: "day",
-        list: "Compras",
+        list: "Tasks/Compras.md",
         id: "new1",
       }),
     );
@@ -179,7 +179,7 @@ describe("ListView", () => {
 
     render(ListView, {
       props: {
-        list: "Compras",
+        list: "Tasks/Compras.md",
         readOnly: false,
         onChanged: noop,
         onError: noop,
@@ -190,14 +190,14 @@ describe("ListView", () => {
 
     await userEvent.click(await screen.findByText("Comprar leite"));
 
-    expect(opened).toEqual([["Compras", "a1"]]);
+    expect(opened).toEqual([["Tasks/Compras.md", "a1"]]);
   });
 
   test("a read-only notebook offers no way to add tasks", async () => {
     bridge({ list_tasks: [task("a1", "Comprar leite")] });
 
     render(ListView, {
-      props: { list: "Compras", readOnly: true, onChanged: noop, onError: noop, reloadKey: 0 },
+      props: { list: "Tasks/Compras.md", readOnly: true, onChanged: noop, onError: noop, reloadKey: 0 },
     });
 
     await screen.findByText("Comprar leite");
@@ -213,7 +213,7 @@ describe("ListView", () => {
 
     render(ListView, {
       props: {
-        list: "Compras",
+        list: "Tasks/Compras.md",
         readOnly: false,
         onChanged: noop,
         onError: (e) => errors.push(e),
@@ -241,9 +241,9 @@ describe("PeriodView", () => {
 
   test("separates what is pulled from what is suggested", async () => {
     bridge({
-      period_tasks: [{ list: "Compras", task: task("a1", "Puxada") }],
+      period_tasks: [{ path: "Tasks/Compras.md", task: task("a1", "Puxada") }],
       grouped_suggestions: [
-        { list: "Inbox", task: task("b2", "Sugerida"), group: "lists" },
+        { path: "Tasks/Inbox.md", task: task("b2", "Sugerida"), group: "lists" },
       ],
     });
 
@@ -259,8 +259,8 @@ describe("PeriodView", () => {
     bridge({
       period_tasks: [],
       grouped_suggestions: [
-        { list: "Inbox", task: task("a1", "Vencida"), group: "urgent" },
-        { list: "Inbox", task: task("b2", "Tranquila"), group: "lists" },
+        { path: "Tasks/Inbox.md", task: task("a1", "Vencida"), group: "urgent" },
+        { path: "Tasks/Inbox.md", task: task("b2", "Tranquila"), group: "lists" },
       ],
     });
 
@@ -294,7 +294,7 @@ describe("PeriodView", () => {
   test("completing an id-less task from the day screen also works", async () => {
     // Same bug as in ListView: a respawned repetition can be sitting in Today.
     bridge({
-      period_tasks: [{ list: "Compras", task: task(null, "Regar plantas") }],
+      period_tasks: [{ path: "Tasks/Compras.md", task: task(null, "Regar plantas") }],
       grouped_suggestions: [],
       ensure_task_id: "new1",
       list_tasks: [task(null, "Regar plantas")],
@@ -306,7 +306,7 @@ describe("PeriodView", () => {
 
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("complete_task", {
-        list: "Compras",
+        list: "Tasks/Compras.md",
         id: "new1",
       }),
     );
@@ -314,7 +314,7 @@ describe("PeriodView", () => {
 
   test("removing a pulled task only touches the period", async () => {
     bridge({
-      period_tasks: [{ list: "Compras", task: task("a1", "Puxada") }],
+      period_tasks: [{ path: "Tasks/Compras.md", task: task("a1", "Puxada") }],
       grouped_suggestions: [],
       remove_from_period: true,
     });
@@ -325,7 +325,7 @@ describe("PeriodView", () => {
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("remove_from_period", {
         period: "day",
-        list: "Compras",
+        list: "Tasks/Compras.md",
         id: "a1",
       }),
     );
@@ -361,7 +361,7 @@ describe("CompletedView", () => {
     expect(await screen.findByText("volta para Compras")).toBeTruthy();
     await userEvent.click(screen.getByLabelText("desmarcar"));
 
-    await waitFor(() => expect(invoke).toHaveBeenCalledWith("uncomplete_task", { id: "a1" }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("uncomplete_task", { list: "Tasks/Completed.md", id: "a1" }));
   });
 
   test("a task with no id cannot be unchecked", async () => {
@@ -388,7 +388,7 @@ describe("CompletedView", () => {
     });
 
     await waitFor(() =>
-      expect(invoke).toHaveBeenCalledWith("list_tasks", { list: "Completed" }),
+      expect(invoke).toHaveBeenCalledWith("list_tasks", { list: "Tasks/Completed.md" }),
     );
   });
 });
@@ -399,7 +399,7 @@ describe("TaskInspector", () => {
   // sitting through half a second of nothing.
   const props = (task, extra = {}) => ({
     task,
-    list: "Compras",
+    list: "Tasks/Compras.md",
     readOnly: false,
     saveDelay: 0,
     onSaved: noop,
@@ -459,7 +459,7 @@ describe("TaskInspector", () => {
 
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("ensure_task_id", {
-        list: "Compras",
+        list: "Tasks/Compras.md",
         position: 0,
       }),
     );
@@ -701,10 +701,17 @@ describe("App", () => {
     path: "/n",
     name: "n",
     readOnly: false,
-    lists: ["Inbox", "Completed"],
-    // The on-disk names travel with the notebook since the snapshot command;
-    // the frontend no longer mirrors them in a names.js.
-    layout: { inbox: "Inbox", completed: "Completed" },
+    lists: [
+      { path: "Tasks/Inbox.md", name: "Inbox" },
+      { path: "Tasks/Completed.md", name: "Completed" },
+    ],
+    // The on-disk addresses travel with the notebook since the snapshot
+    // command; since phase 7 they are paths, not names.
+    layout: {
+      inbox: "Tasks/Inbox.md",
+      completed: "Tasks/Completed.md",
+      tasksFolder: "Tasks",
+    },
   };
 
   const shell = (extra = {}) =>
@@ -723,7 +730,7 @@ describe("App", () => {
         counts: {},
         conflicts: [],
       },
-      screen_to_restore: "list:Inbox",
+      screen_to_restore: "list:Tasks/Inbox.md",
       list_tasks: [task("a1", "Comprar leite"), task("b2", "Pagar boleto")],
       period_tasks: [],
       grouped_suggestions: [],

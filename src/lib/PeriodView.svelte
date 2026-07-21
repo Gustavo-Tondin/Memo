@@ -4,6 +4,7 @@
   // to the Inbox by the core.
   import { api } from "./api.js";
   import { ensureTaskId } from "./taskId.js";
+  import { listName } from "./paths.js";
   import TaskRow from "./TaskRow.svelte";
 
   let {
@@ -105,17 +106,17 @@
   <p class="empty">Nada escolhido ainda. Puxe algo das sugestões abaixo.</p>
 {:else}
   <ul>
-    {#each pulled as entry, i (`${entry.list}/${entry.task.id ?? ""}#${i}`)}
+    {#each pulled as entry, i (`${entry.path}/${entry.task.id ?? ""}#${i}`)}
       <TaskRow
         task={entry.task}
-        list={entry.list}
+        list={entry.path}
         showList
         {onSelect}
         selected={!!entry.task.id && entry.task.id === selectedId}
         onComplete={complete}
         onEdit={edit}
       >
-        <button onclick={() => remove(entry.list, entry.task.id)}>tirar</button>
+        <button onclick={() => remove(entry.path, entry.task.id)}>tirar</button>
       </TaskRow>
     {/each}
   </ul>
@@ -130,16 +131,16 @@
       <details open={group.key !== "lists"}>
         <summary>{group.label} ({group.items.length})</summary>
         <ul>
-          {#each group.items as entry, i (`${entry.list}/${entry.task.id ?? ""}#${i}`)}
+          {#each group.items as entry, i (`${entry.path}/${entry.task.id ?? ""}#${i}`)}
             <li>
               <button
                 class="text"
-                onclick={() => onSelect?.(entry.list, entry.task)}
+                onclick={() => onSelect?.(entry.path, entry.task)}
                 title="clique para abrir">{entry.task.text}</button
               >
               {#if entry.task.due}<small class="due">{entry.task.due}</small>{/if}
-              <small class="from">{entry.list}</small>
-              <button onclick={() => pull(entry.list, entry.task)}>puxar</button>
+              <small class="from">{listName(entry.path)}</small>
+              <button onclick={() => pull(entry.path, entry.task)}>puxar</button>
             </li>
           {/each}
         </ul>

@@ -7,6 +7,7 @@
   import PeriodView from "./lib/PeriodView.svelte";
   import CompletedView from "./lib/CompletedView.svelte";
   import TaskInspector from "./lib/TaskInspector.svelte";
+  import { listName } from "./lib/paths.js";
 
   let notebook = $state(null);
   let clock = $state(null);
@@ -72,16 +73,21 @@
     selected = null;
   });
 
-  // The names the core creates come over the bridge with the notebook. The
-  // frontend used to mirror them in a names.js — and when the core renamed
-  // the completed list, the mirror went stale and the screen read a file
-  // that no longer existed.
+  // The addresses the core creates come over the bridge with the notebook.
+  // The frontend used to mirror them in a names.js — and when the core
+  // renamed the completed list, the mirror went stale and the screen read a
+  // file that no longer existed. Since phase 7 these are paths, and each
+  // list arrives as { path, name }.
   let layout = $derived(
-    notebook?.layout ?? { inbox: "Inbox", completed: "Completed" },
+    notebook?.layout ?? {
+      inbox: "Tasks/Inbox.md",
+      completed: "Tasks/Completed.md",
+      tasksFolder: "Tasks",
+    },
   );
 
   let userLists = $derived(
-    (notebook?.lists ?? []).filter((name) => name !== layout.completed),
+    (notebook?.lists ?? []).filter((entry) => entry.path !== layout.completed),
   );
 
   function fail(e) {
@@ -141,9 +147,12 @@
     const name = prompt("Nome da nova lista:");
     if (!name) return;
     try {
-      await api.createList(name.trim());
+      await api.createList(layout.tasksFolder, name.trim());
       await refreshNotebook();
-      view = { kind: "list", list: name.trim() };
+      view = {
+        kind: "list",
+        list: `${layout.tasksFolder}/${name.trim()}.md`,
+      };
     } catch (e) {
       fail(e);
     }
@@ -151,12 +160,15 @@
 
   async function renameCurrentList() {
     if (view.kind !== "list") return;
-    const to = prompt(`Novo nome para "${view.list}":`, view.list);
-    if (!to || to === view.list) return;
+    const current = listName(view.list);
+    const to = prompt(`Novo nome para "${current}":`, current);
+    if (!to || to.trim() === current) return;
     try {
       await api.renameList(view.list, to.trim());
       await refreshNotebook();
-      view = { kind: "list", list: to.trim() };
+      // A rename never changes the folder: swap only the file name.
+      const dir = view.list.slice(0, view.list.lastIndexOf("/"));
+      view = { kind: "list", list: `${dir}/${to.trim()}.md` };
       reload();
     } catch (e) {
       fail(e);
@@ -166,7 +178,11 @@
   async function deleteCurrentList() {
     if (view.kind !== "list") return;
     const list = view.list;
-    if (!confirm(`Apagar "${list}"? As tarefas restantes vão para a Inbox.`))
+    if (
+      !confirm(
+        `Apagar "${listName(list)}"? As tarefas restantes vão para a Inbox.`,
+      )
+    )
       return;
     try {
       const rescued = await api.deleteList(list);
@@ -174,7 +190,7 @@
       view = { kind: "list", list: layout.inbox };
       reload();
       if (rescued > 0) {
-        error = `${rescued} tarefa(s) de "${list}" foram movidas para a Inbox.`;
+        error = `${rescued} tarefa(s) de "${listName(list)}" foram movidas para a Inbox.`;
       }
     } catch (e) {
       fail(e);
@@ -264,13 +280,14 @@
         >
 
         <hr />
-        {#each userLists as list}
+        {#each userLists as entry (entry.path)}
           <button
-            class:active={view.kind === "list" && view.list === list}
-            onclick={() => (view = { kind: "list", list })}
+            class:active={view.kind === "list" && view.list === entry.path}
+            onclick={() => (view = { kind: "list", list: entry.path })}
           >
-            {list}
-            {#if counts[list]}<span class="count">{counts[list]}</span>{/if}
+            {entry.name}
+            {#if counts[entry.path]}<span class="count">{counts[entry.path]}</span
+              >{/if}
           </button>
         {/each}
 

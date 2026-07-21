@@ -50,8 +50,9 @@ pub const INBOX_LIST: &str = "Inbox";
 pub const COMPLETED_LIST: &str = "Completed";
 
 /// The names these used to have, before the app settled on English in
-/// 2026-07-20. Kept so notebooks created by earlier versions can be migrated
-/// instead of breaking — see [`notebook::Notebook::open`].
+/// 2026-07-20. Kept so [`notebook::Notebook::open`] can *recognize* a legacy
+/// notebook and refuse it with a clear message — the pre-v1 policy is no
+/// migrations (2026-07-21), and from v1 on that inverts permanently.
 pub mod legacy {
     pub const TASKS_DIR: &str = "Tarefas";
     pub const NOTES_DIR: &str = "Notas";
@@ -82,7 +83,7 @@ mod tests {
 
     #[test]
     fn legacy_names_are_the_ones_we_migrate_from() {
-        // These must never change: they describe notebooks already on disk.
+        // These must never change: they recognize notebooks already on disk.
         assert_eq!(legacy::TASKS_DIR, "Tarefas");
         assert_eq!(legacy::NOTES_DIR, "Notas");
         assert_eq!(legacy::COMPLETED_LIST, "Completas");

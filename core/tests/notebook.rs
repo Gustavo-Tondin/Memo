@@ -126,22 +126,22 @@ fn editing_an_unknown_id_is_an_error() {
 fn moving_a_task_preserves_the_id_and_records_the_origin() {
     let dir = tempfile::tempdir().unwrap();
     let notebook = Notebook::init(dir.path()).unwrap();
-    notebook.create_list("Compras").unwrap();
+    notebook.create_list("Tasks", "Compras").unwrap();
 
-    let mut compras = notebook.open_list("Compras").unwrap();
+    let mut compras = notebook.open_list("Tasks/Compras.md").unwrap();
     let id = compras.add_text_with_id("Comprar leite");
     compras.save().unwrap();
 
     let moved = notebook
-        .move_task(&id, "Compras", "Completed", OriginAction::Record)
+        .move_task(&id, "Tasks/Compras.md", "Tasks/Completed.md", OriginAction::Record)
         .unwrap();
 
     assert_eq!(moved.id.as_deref(), Some(id.as_str()));
     assert_eq!(moved.origin.as_deref(), Some("Compras"));
 
     // Gone from the source, present in the target, both on disk.
-    assert!(notebook.open_list("Compras").unwrap().find(&id).is_none());
-    let completed = notebook.completed().unwrap();
+    assert!(notebook.open_list("Tasks/Compras.md").unwrap().find(&id).is_none());
+    let completed = notebook.open_list("Tasks/Completed.md").unwrap();
     let task = completed.find(&id).unwrap();
     assert_eq!(task.text, "Comprar leite");
     assert_eq!(task.origin.as_deref(), Some("Compras"));
@@ -153,22 +153,22 @@ fn moving_a_task_preserves_the_id_and_records_the_origin() {
 fn moving_a_task_back_can_clear_the_origin() {
     let dir = tempfile::tempdir().unwrap();
     let notebook = Notebook::init(dir.path()).unwrap();
-    notebook.create_list("Compras").unwrap();
+    notebook.create_list("Tasks", "Compras").unwrap();
 
-    let mut compras = notebook.open_list("Compras").unwrap();
+    let mut compras = notebook.open_list("Tasks/Compras.md").unwrap();
     let id = compras.add_text_with_id("Comprar leite");
     compras.save().unwrap();
 
     notebook
-        .move_task(&id, "Compras", "Completed", OriginAction::Record)
+        .move_task(&id, "Tasks/Compras.md", "Tasks/Completed.md", OriginAction::Record)
         .unwrap();
     let back = notebook
-        .move_task(&id, "Completed", "Compras", OriginAction::Clear)
+        .move_task(&id, "Tasks/Completed.md", "Tasks/Compras.md", OriginAction::Clear)
         .unwrap();
 
     assert_eq!(back.origin, None);
-    assert!(notebook.completed().unwrap().find(&id).is_none());
-    assert!(notebook.open_list("Compras").unwrap().find(&id).is_some());
+    assert!(notebook.open_list("Tasks/Completed.md").unwrap().find(&id).is_none());
+    assert!(notebook.open_list("Tasks/Compras.md").unwrap().find(&id).is_some());
     assert!(!read(dir.path().join("Tasks/Compras.md")).contains("origin:"));
 }
 
@@ -188,7 +188,7 @@ fn moving_a_task_does_not_disturb_the_other_lines() {
     .unwrap();
 
     notebook
-        .move_task("bbb222", "Inbox", "Completed", OriginAction::Record)
+        .move_task("bbb222", "Tasks/Inbox.md", "Tasks/Completed.md", OriginAction::Record)
         .unwrap();
 
     let inbox = read(&inbox_path);
@@ -202,27 +202,50 @@ fn creating_and_listing_lists() {
     let dir = tempfile::tempdir().unwrap();
     let notebook = Notebook::init(dir.path()).unwrap();
 
-    notebook.create_list("Compras").unwrap();
-    notebook.create_list("Projeto Y").unwrap();
+    notebook.create_list("Tasks", "Compras").unwrap();
+    notebook.create_list("Tasks", "Projeto Y").unwrap();
 
-    let names = notebook.list_names().unwrap();
+    let names = notebook.lists().unwrap();
+    let names: Vec<String> = names.into_iter().map(|l| l.name).collect();
     assert_eq!(names, vec!["Completed", "Compras", "Inbox", "Projeto Y"]);
 
     assert!(dir.path().join("Tasks/Projeto Y.md").is_file());
     assert!(
-        notebook.create_list("Compras").is_err(),
+        notebook.create_list("Tasks", "Compras").is_err(),
         "creating a duplicate list should fail"
     );
 }
 
 #[test]
-fn list_names_that_could_escape_the_folder_are_rejected() {
+fn list_addresses_that_could_escape_the_notebook_are_rejected() {
+    // Phase 7 inverted the rule: `/` stopped being forbidden and became the
+    // separator. What stays forbidden is anything that climbs out, hides, or
+    // breaks the comment format.
     let dir = tempfile::tempdir().unwrap();
     let notebook = Notebook::init(dir.path()).unwrap();
 
+    for address in [
+        "../fora.md",           // climbs out of the notebook
+        "Tasks/../.memo/x.md",  // climbs through a valid folder
+        "/etc/passwd.md",       // absolute
+        "Tasks/.oculta.md",     // hidden file
+        ".memo/lista.md",       // hidden folder
+        "Tasks/a\0b.md",        // NUL
+        "Tasks/Mi\"casa.md",    // the comment quote character
+        "Tasks/lista",          // not a .md file
+        "Solta.md",             // a list never lives at the notebook root
+        "Tasks//x.md",          // empty component
+    ] {
+        assert!(
+            notebook.open_list(address).is_err(),
+            "should have rejected list address {address:?}"
+        );
+    }
+
+    // And the names inside create_list follow the same rule.
     for name in ["../fora", "sub/lista", "", "   ", ".oculta", "a\0b"] {
         assert!(
-            notebook.list_path(name).is_err(),
+            notebook.create_list("Tasks", name).is_err(),
             "should have rejected list name {name:?}"
         );
     }
@@ -240,20 +263,20 @@ fn a_task_earns_an_id_only_when_something_needs_to_address_it() {
     std::fs::write(&inbox_path, original).unwrap();
 
     // Reading changes nothing.
-    let tasks = notebook.tasks_in("Inbox").unwrap();
+    let tasks = notebook.tasks_in("Tasks/Inbox.md").unwrap();
     assert_eq!(tasks[0].id, None, "a plain line stays plain");
     assert_eq!(tasks[1].id.as_deref(), Some("aaa111"));
     assert_eq!(std::fs::read_to_string(&inbox_path).unwrap(), original);
 
     // Acting on it does.
-    let id = notebook.ensure_task_id("Inbox", 0).unwrap();
+    let id = notebook.ensure_task_id("Tasks/Inbox.md", 0).unwrap();
     assert!(!id.is_empty());
     assert!(std::fs::read_to_string(&inbox_path).unwrap().contains(&id));
 
     // And asking twice gives the same id, without rewriting anything.
-    assert_eq!(notebook.ensure_task_id("Inbox", 0).unwrap(), id);
+    assert_eq!(notebook.ensure_task_id("Tasks/Inbox.md", 0).unwrap(), id);
     assert!(
-        notebook.open_list("Inbox").unwrap().find("aaa111").is_some(),
+        notebook.open_list("Tasks/Inbox.md").unwrap().find("aaa111").is_some(),
         "the existing id must not be regenerated"
     );
 }
@@ -281,24 +304,24 @@ fn a_full_round_trip_through_the_notebook() {
     // create → complete → undo, checking the files at every step.
     let dir = tempfile::tempdir().unwrap();
     let notebook = Notebook::init(dir.path()).unwrap();
-    notebook.create_list("Compras").unwrap();
+    notebook.create_list("Tasks", "Compras").unwrap();
 
-    let mut compras = notebook.open_list("Compras").unwrap();
+    let mut compras = notebook.open_list("Tasks/Compras.md").unwrap();
     let id = compras.add_text_with_id("Comprar leite");
     compras.save().unwrap();
 
     // complete
     notebook
-        .move_task(&id, "Compras", "Completed", OriginAction::Record)
+        .move_task(&id, "Tasks/Compras.md", "Tasks/Completed.md", OriginAction::Record)
         .unwrap();
-    let mut completed = notebook.completed().unwrap();
+    let mut completed = notebook.open_list("Tasks/Completed.md").unwrap();
     completed.set_done(&id, true).unwrap();
     completed.save().unwrap();
     assert!(read(dir.path().join("Tasks/Completed.md")).contains("- [x] Comprar leite"));
 
     // undo, back to the recorded origin
     let origin = notebook
-        .completed()
+        .open_list("Tasks/Completed.md")
         .unwrap()
         .find(&id)
         .unwrap()
@@ -307,14 +330,42 @@ fn a_full_round_trip_through_the_notebook() {
         .unwrap();
     assert_eq!(origin, "Compras");
 
+    // The origin is a bare name, relative to the folder; the caller builds
+    // the address — exactly what uncomplete_task does for real.
     notebook
-        .move_task(&id, "Completed", &origin, OriginAction::Clear)
+        .move_task(
+            &id,
+            "Tasks/Completed.md",
+            &format!("Tasks/{origin}.md"),
+            OriginAction::Clear,
+        )
         .unwrap();
-    let mut compras = notebook.open_list("Compras").unwrap();
+    let mut compras = notebook.open_list("Tasks/Compras.md").unwrap();
     compras.set_done(&id, false).unwrap();
     compras.save().unwrap();
 
     let final_state = read(dir.path().join("Tasks/Compras.md"));
     assert!(final_state.contains("- [ ] Comprar leite"));
     assert!(read(dir.path().join("Tasks/Completed.md")).trim().is_empty());
+}
+
+#[test]
+fn a_legacy_notebook_is_refused_with_a_clear_message() {
+    // Decided on 2026-07-21: no migrations before v1 — there is exactly one
+    // (test) notebook in the world. Refusing loudly beats converting in
+    // silence while the format still changes weekly. From v1 on this
+    // inverts, permanently.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".memo")).unwrap();
+    std::fs::create_dir_all(dir.path().join("Tarefas")).unwrap();
+    std::fs::write(dir.path().join("Tarefas/Inbox.md"), "- [ ] antiga\n").unwrap();
+
+    let err = Notebook::open(dir.path()).unwrap_err();
+    assert!(
+        matches!(err, memo_core::Error::LegacyNotebook(_)),
+        "expected LegacyNotebook, got {err:?}"
+    );
+    // And nothing was touched: the user's files are exactly as they were.
+    assert_eq!(read(dir.path().join("Tarefas/Inbox.md")), "- [ ] antiga\n");
+    assert!(!dir.path().join("Tasks").exists());
 }
