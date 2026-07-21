@@ -8,6 +8,7 @@ import {
   close,
   currentView,
   forward,
+  move,
   navigate,
   open,
   replaceView,
@@ -105,6 +106,30 @@ describe("tabs", () => {
 
     expect(viewId(currentView(renamed[1]))).toBe("list:Tasks/Mercado.md");
     expect(viewId(currentView(renamed[0]))).toBe("home");
+  });
+
+  test("moving a tab keeps the same one focused", () => {
+    const { tabs } = bar(home, week, list("Tasks/Inbox.md"));
+
+    // Dragging the tab you are on: focus follows it.
+    const dragged = move(tabs, 0, 0, 2);
+    expect(viewId(currentView(dragged.tabs[dragged.active]))).toBe("home");
+    expect(dragged.tabs.map((t) => viewId(currentView(t)))).toEqual([
+      "week",
+      "list:Tasks/Inbox.md",
+      "home",
+    ]);
+
+    // Dragging another tab past you: you stay on the same document.
+    const other = move(tabs, 1, 0, 2);
+    expect(viewId(currentView(other.tabs[other.active]))).toBe("week");
+  });
+
+  test("a move that goes nowhere changes nothing", () => {
+    const { tabs } = bar(home, week);
+    expect(move(tabs, 0, 1, 1).tabs).toBe(tabs);
+    expect(move(tabs, 0, 0, 9).tabs).toBe(tabs);
+    expect(move(tabs, 0, -1, 0).tabs).toBe(tabs);
   });
 
   test("view ids tell the documents apart", () => {

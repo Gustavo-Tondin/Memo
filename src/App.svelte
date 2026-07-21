@@ -10,7 +10,7 @@
   import { listen } from "@tauri-apps/api/event";
   import { api, describeError } from "./lib/api.js";
   import ListView from "./lib/ListView.svelte";
-  import PeriodView from "./lib/PeriodView.svelte";
+  import TasksView from "./lib/TasksView.svelte";
   import CompletedView from "./lib/CompletedView.svelte";
   import TaskInspector from "./lib/TaskInspector.svelte";
   import WorkspaceView from "./lib/WorkspaceView.svelte";
@@ -35,6 +35,8 @@
   let noteFolders = $state([]);
   /// The task open in the right-hand panel, as `{ list, task }`.
   let selected = $state(null);
+  /// What the open note reports about itself, for the page header and menu.
+  let openNote = $state({ pinned: false, title: "" });
 
   // Tabs. The active tab's current view is what the centre panel shows.
   let tabs = $state([{ views: [{ kind: "home" }], at: 0 }]);
@@ -87,7 +89,8 @@
   function restoreView(id) {
     if (!id) return null;
     if (id === "day" || id === "week") return { kind: "period", period: id };
-    if (id === "home" || id === "completed" || id === "notes") return { kind: id };
+    if (id === "home" || id === "completed" || id === "notes" || id === "tasks")
+      return { kind: id };
     if (id.startsWith("list:")) return { kind: "list", list: id.slice(5) };
     if (id.startsWith("ws:")) return { kind: "workspace", ws: id.slice(3) };
     return null;
@@ -112,6 +115,7 @@
     (notebook?.lists ?? []).filter(
       (entry) =>
         entry.path !== layout.completed &&
+        entry.path !== layout.inbox &&
         // Lists of user workspaces are reached through their workspace, not
         // flattened into the fixed sidebar — two Inboxes side by side with
         // the same label would be unreadable.
@@ -129,6 +133,8 @@
         return S.home;
       case "period":
         return v.period === "day" ? S.today : S.week;
+      case "tasks":
+        return S.tasks;
       case "notes":
         return S.notes;
       case "completed":
@@ -149,6 +155,16 @@
   /// The page menu of the current screen — the `•••` of the wireframe.
   let pageMenu = $derived.by(() => {
     if (notebook?.readOnly) return [];
+
+    // A note's own actions belong here, not to a second bar inside the page.
+    if (view.kind === "note") {
+      return [
+        { label: openNote.pinned ? S.unpin : S.pin, run: toggleNotePin },
+        { label: S.renameNote, run: renameCurrentNote },
+        { label: S.deleteNote, run: deleteCurrentNote },
+      ];
+    }
+
     const items = [{ label: S.newListButton, run: createList }];
     // Renaming or deleting a list the app recreates on every open would only
     // confuse — the core refuses it anyway, so the menu must not offer it.
@@ -164,6 +180,50 @@
     }
     return items;
   });
+
+  // --- the open note's document actions, owned by the shell because each
+  // one changes what the tab points at ---
+
+  let noteEditor = $state(null);
+
+  async function noteAction(fn) {
+    try {
+      // Anything still being typed goes out first: renaming or deleting
+      // underneath a pending write would lose it.
+      await noteEditor?.flushPending();
+      await fn();
+      await refreshNotebook();
+      reload();
+    } catch (e) {
+      fail(e);
+    }
+  }
+
+  const toggleNotePin = () =>
+    noteAction(async () => {
+      await api.setNotePinned(view.folder, view.path, !openNote.pinned);
+      openNote = { ...openNote, pinned: !openNote.pinned };
+    });
+
+  const renameCurrentNote = () =>
+    noteAction(async () => {
+      const next = prompt(S.promptRenameNote(openNote.title), openNote.title);
+      if (!next || next.trim() === openNote.title) return;
+      const moved = await api.renameNote(view.folder, view.path, next.trim());
+      // The tab follows the file rather than pointing at a name that is gone.
+      tabs = Tabs.replaceView(tabs, Tabs.viewId(view), {
+        kind: "note",
+        folder: view.folder,
+        path: moved,
+      });
+    });
+
+  const deleteCurrentNote = () =>
+    noteAction(async () => {
+      if (!confirm(S.confirmDeleteNote(openNote.title))) return;
+      await api.deleteNote(view.folder, view.path);
+      closeTab(active);
+    });
 
   function fail(e) {
     error = describeError(e);
@@ -311,8 +371,14 @@
     }
   })();
 
-  const openNote = (path) =>
-    openTab({ kind: "note", folder: layout.notesFolder, path });
+  /// Opening a document replaces what the tab shows, the way clicking a link
+  /// does — a new tab is a deliberate gesture (middle click, or the option in
+  /// the context menu), never the default.
+  const showNote = (path, folder = layout.notesFolder, newTab = false) =>
+    (newTab ? openTab : goTo)({ kind: "note", folder, path });
+
+  const showList = (path, newTab = false) =>
+    (newTab ? openTab : goTo)({ kind: "list", list: path });
 </script>
 
 <svelte:window onkeydown={onKeydown} />
@@ -336,14 +402,8 @@
             onclick={() => openTab({ kind: "home" })}>{S.home}</button
           >
           <button
-            class:active={isOpen({ kind: "period", period: "day" })}
-            onclick={() => openTab({ kind: "period", period: "day" })}
-            >{S.today}</button
-          >
-          <button
-            class:active={isOpen({ kind: "period", period: "week" })}
-            onclick={() => openTab({ kind: "period", period: "week" })}
-            >{S.week}</button
+            class:active={isOpen({ kind: "tasks" })}
+            onclick={() => openTab({ kind: "tasks" })}>{S.tasks}</button
           >
           <button
             class:active={isOpen({ kind: "notes" })}
@@ -354,7 +414,10 @@
           {#each userLists as entry (entry.path)}
             <button
               class:active={isOpen({ kind: "list", list: entry.path })}
-              onclick={() => openTab({ kind: "list", list: entry.path })}
+              onclick={() => showList(entry.path)}
+              onauxclick={(e) =>
+                e.button === 1 && (e.preventDefault(), showList(entry.path, true))}
+              title={S.openInNewTab}
             >
               {entry.name}
               {#if counts[entry.path]}<span class="count"
@@ -404,6 +467,8 @@
           {titleOf}
           onSelect={(i) => (active = i)}
           onClose={closeTab}
+          onMove={(from, to) =>
+            ({ tabs, active } = Tabs.move(tabs, active, from, to))}
         />
         <PageHeader
           title={titleOf(view)}
@@ -412,6 +477,9 @@
           canForward={Tabs.canGoForward(tabs[active])}
           onBack={goBack}
           onForward={goForward}
+          onRenameTitle={view.kind === "note" && !notebook.readOnly
+            ? renameCurrentNote
+            : null}
           menu={pageMenu}
         />
 
@@ -449,13 +517,13 @@
               {reloadKey}
               onChanged={refreshNotebook}
               onError={fail}
-              onOpenNote={openNote}
+              onOpenNote={(path) => showNote(path)}
               onSelectTask={select}
               selectedId={selected?.task?.id ?? null}
             />
-          {:else if view.kind === "period"}
-            <PeriodView
-              period={view.period}
+          {:else if view.kind === "tasks"}
+            <TasksView
+              inbox={layout.inbox}
               {clock}
               readOnly={notebook.readOnly}
               onChanged={refreshNotebook}
@@ -482,24 +550,17 @@
               {reloadKey}
               onChanged={refreshNotebook}
               onError={fail}
-              onOpenNote={openNote}
+              onOpenNote={showNote}
             />
           {:else if view.kind === "note"}
             <NoteEditor
+              bind:this={noteEditor}
               folder={view.folder}
               path={view.path}
               readOnly={notebook.readOnly}
               onSaved={refreshNotebook}
               onError={fail}
-              onClose={() => closeTab(active)}
-              onRenamed={(path) => {
-                const from = Tabs.viewId(view);
-                tabs = Tabs.replaceView(tabs, from, {
-                  kind: "note",
-                  folder: view.folder,
-                  path,
-                });
-              }}
+              onLoaded={(state) => (openNote = state)}
             />
           {:else if view.kind === "workspace"}
             {@const current = userWorkspaces.find((w) => w.folderName === view.ws)}
@@ -512,9 +573,8 @@
                 notesInbox={layout.notesInbox}
                 readOnly={notebook.readOnly}
                 {reloadKey}
-                onOpenList={(path) => openTab({ kind: "list", list: path })}
-                onOpenNote={(path, folder) =>
-                  openTab({ kind: "note", folder, path })}
+                onOpenList={(path) => showList(path)}
+                onOpenNote={(path, folder) => showNote(path, folder)}
                 onChanged={refreshNotebook}
                 onError={fail}
               />

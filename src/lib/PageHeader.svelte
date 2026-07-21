@@ -10,10 +10,19 @@
     canForward = false,
     onBack,
     onForward,
+    onRenameTitle,
     menu = [],
   } = $props();
 
   let open = $state(false);
+
+  // A menu left hanging over a screen the user has already left is a menu
+  // whose items act on the wrong thing. Changing page closes it.
+  $effect(() => {
+    title;
+    subtitle;
+    open = false;
+  });
 </script>
 
 <header class="page-header">
@@ -29,7 +38,13 @@
   </div>
 
   <h1>
-    {title}{#if subtitle}<span class="subtitle"> — {subtitle}</span>{/if}
+    {#if onRenameTitle}
+      <button class="title" title={S.promptRenameNote(title)} onclick={() => onRenameTitle()}>
+        {title}
+      </button>
+    {:else}
+      {title}
+    {/if}{#if subtitle}<span class="subtitle"> — {subtitle}</span>{/if}
   </h1>
 
   {#if menu.length > 0}
@@ -75,6 +90,19 @@
   }
   .subtitle {
     font-weight: 400;
+  }
+  /* The document's own name, clicked to rename it — the only place it
+     appears, right under the tabs. */
+  .title {
+    font: inherit;
+    color: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+    padding: 0.1rem 0.4rem;
+  }
+  .title:hover {
+    background: #eee;
+    color: #222;
   }
   .arrows,
   .menu {

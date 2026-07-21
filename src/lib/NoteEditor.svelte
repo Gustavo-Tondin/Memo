@@ -17,14 +17,11 @@
     readOnly = false,
     onSaved,
     onError,
-    onClose,
-    onRenamed,
+    onLoaded,
     saveDelay = 500,
   } = $props();
 
-  let title = $state("");
   let body = $state("");
-  let pinned = $state(false);
   let loading = $state(true);
 
   // Plain, not reactive: none of this should re-render anything.
@@ -49,10 +46,11 @@
     try {
       const note = await api.readNote(atFolder, atPath);
       slot = { folder: atFolder, path: atPath };
-      title = note.title;
       body = note.body;
-      pinned = note.pinned;
       baseline = note.body;
+      // The shell owns the title and the document actions — they belong to
+      // the page header, above the tabs, not to a second bar inside the page.
+      onLoaded?.({ pinned: note.pinned, title: note.title });
     } catch (e) {
       onError?.(e);
     } finally {
@@ -95,47 +93,9 @@
     }
   }
 
-  async function act(fn) {
-    try {
-      await flush();
-      await fn();
-      onSaved?.();
-    } catch (e) {
-      onError?.(e);
-    }
-  }
-
-  const togglePin = () =>
-    act(async () => {
-      await api.setNotePinned(folder, path, !pinned);
-      pinned = !pinned;
-    });
-
-  const rename = () =>
-    act(async () => {
-      const next = prompt(S.promptRenameNote(title), title);
-      if (!next || next.trim() === title) return;
-      const moved = await api.renameNote(folder, path, next.trim());
-      onRenamed?.(moved);
-    });
-
-  const remove = () =>
-    act(async () => {
-      if (!confirm(S.confirmDeleteNote(title))) return;
-      await api.deleteNote(folder, path);
-      onClose?.();
-    });
+  /// Sends anything still pending, so the shell can rename or delete safely.
+  export const flushPending = () => flush();
 </script>
-
-<header>
-  <button class="back" onclick={() => onClose?.()}>{S.backToNotes}</button>
-  <h2>{title}</h2>
-  {#if !readOnly}
-    <button onclick={togglePin}>{pinned ? S.unpin : S.pin}</button>
-    <button onclick={rename}>{S.renameNote}</button>
-    <button onclick={remove}>{S.deleteNote}</button>
-  {/if}
-</header>
 
 <div class="body" aria-label={S.noteBodyPlaceholder}>
   <Editor
@@ -147,24 +107,6 @@
 </div>
 
 <style>
-  header {
-    display: flex;
-    align-items: baseline;
-    gap: 0.5rem;
-    margin-bottom: 0.5rem;
-  }
-  h2 {
-    flex: 1;
-    margin: 0;
-  }
-  .back {
-    background: none;
-    border: none;
-    cursor: pointer;
-    font: inherit;
-    color: #555;
-    padding: 0;
-  }
   .body {
     min-height: 60vh;
   }

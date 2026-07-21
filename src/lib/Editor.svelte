@@ -5,7 +5,7 @@
   // did when this was a `<textarea>` — which is what let the note editor keep
   // its auto-save untouched when the engine changed underneath.
   import { onDestroy, onMount } from "svelte";
-  import { EditorState } from "@codemirror/state";
+  import { Compartment, EditorState } from "@codemirror/state";
   import { EditorView, keymap, placeholder as placeholderExt } from "@codemirror/view";
   import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
   import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
@@ -15,6 +15,13 @@
 
   let host;
   let view = null;
+  /// Extensions are baked in when the state is created, so anything that
+  /// changes later needs a compartment to be reconfigurable.
+  ///
+  /// This is not a detail: without it the editor was created while the note
+  /// was still loading — `readOnly || loading` — and stayed read-only
+  /// forever. The file rendered beautifully and refused every keystroke.
+  const editable = new Compartment();
   /// What the editor itself last produced, so an echo of our own change does
   /// not get pushed back in and move the cursor.
   let lastEmitted = null;
@@ -39,7 +46,7 @@
           markdownPreview,
           EditorView.lineWrapping,
           placeholderExt(placeholder),
-          EditorState.readOnly.of(readOnly),
+          editable.of(EditorState.readOnly.of(readOnly)),
           EditorView.updateListener.of((update) => {
             if (!update.docChanged) return;
             lastEmitted = update.state.doc.toString();
@@ -51,6 +58,14 @@
   });
 
   onDestroy(() => view?.destroy());
+
+  // Read-only follows the prop, which flips as soon as the note has loaded.
+  $effect(() => {
+    const ro = readOnly;
+    view?.dispatch({
+      effects: editable.reconfigure(EditorState.readOnly.of(ro)),
+    });
+  });
 
   // A value that arrives from outside (another note opened, the file reloaded
   // from disk) replaces the document. Our own echo is ignored: re-setting it

@@ -46,6 +46,8 @@ export const S = {
   // Shell (phase 8.5)
   home: "Home",
   tasks: "Tasks",
+  inboxTab: "Inbox",
+  openInNewTab: "open in new tab",
   closeTab: "close tab",
   goBack: "back",
   goForward: "forward",

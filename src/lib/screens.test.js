@@ -28,6 +28,8 @@ const { default: WorkspaceView } = await import("./WorkspaceView.svelte");
 const { default: NotesWidget } = await import("./NotesWidget.svelte");
 const { default: NoteEditor } = await import("./NoteEditor.svelte");
 const { default: HomeView } = await import("./HomeView.svelte");
+const { default: PageHeader } = await import("./PageHeader.svelte");
+const { default: TabBar } = await import("./TabBar.svelte");
 
 const task = (id, text, extra = {}) => ({
   id,
@@ -835,7 +837,7 @@ describe("App", () => {
     render(App);
 
     await openTask("Comprar leite");
-    await userEvent.click(screen.getByText("Today"));
+    await userEvent.click(screen.getByRole("button", { name: "Tasks" }));
 
     await waitFor(() => expect(screen.queryByLabelText("task name")).toBeNull());
   });
@@ -977,9 +979,9 @@ describe("App with a user workspace", () => {
     await userEvent.click(screen.getByText("Project A"));
     expect(await screen.findByText("Sprint")).toBeTruthy();
 
-    // And its lists are not flattened into the fixed sidebar.
-    const sidebarInbox = screen.getAllByText("Inbox");
-    expect(sidebarInbox.length).toBe(1);
+    // And its lists are not flattened into the fixed sidebar: the only
+    // "Inbox" on screen is the one this workspace's widget listed.
+    expect(screen.queryByRole("button", { name: /^Inbox/ })).toBeNull();
   });
 
   test("opening a list from the workspace lands on the list screen", async () => {
@@ -1189,6 +1191,32 @@ describe("NoteEditor", () => {
 
     const field = await screen.findByDisplayValue("Corpo.");
     expect(field.disabled).toBe(true);
+  });
+
+  test("the editor is writable once the note has loaded", async () => {
+    // The bug this guards: the engine baked `readOnly || loading` in at
+    // creation, and since a note is always loading at that instant, the
+    // editor rendered the file beautifully and refused every keystroke.
+    bridge(loaded());
+
+    render(NoteEditor, { props: props() });
+
+    const field = await screen.findByDisplayValue("Corpo.");
+    await waitFor(() => expect(field.disabled).toBe(false));
+  });
+
+  test("the note reports its title and pin state to the shell", async () => {
+    // They belong to the page header above the tabs, not to a second bar
+    // inside the page.
+    const seen = [];
+    bridge(loaded());
+
+    render(NoteEditor, { props: props({ onLoaded: (s) => seen.push(s) }) });
+
+    await waitFor(() => expect(seen.length).toBe(1));
+    expect(seen[0]).toEqual({ pinned: false, title: "Ideia" });
+    // And it draws no header of its own.
+    expect(screen.queryByText("← notes")).toBeNull();
     expect(screen.queryByText("delete")).toBeNull();
   });
 });
@@ -1420,18 +1448,40 @@ describe("App shell with tabs", () => {
     await waitFor(() => expect(tabLabels()).toEqual(["Home"]));
   });
 
-  test("opening two screens opens two tabs, and reopening focuses", async () => {
+  test("a document opens in the tab you are on, not a new one", async () => {
+    // Clicking a document is like following a link: it replaces what the tab
+    // shows. A new tab is a deliberate gesture.
     shell();
     render(App);
-    await waitFor(() => expect(tabLabels().length).toBe(1));
+    await waitFor(() => expect(tabLabels()).toEqual(["Home"]));
 
     await userEvent.click(screen.getByRole("button", { name: /^Compras/ }));
-    await waitFor(() => expect(tabLabels()).toEqual(["Home", "Compras"]));
+    await waitFor(() => expect(tabLabels()).toEqual(["Compras"]));
+  });
 
-    // Reopening a screen that is already in a tab focuses it instead of
-    // filling the bar with copies.
+  test("middle click opens a document in a new tab", async () => {
+    shell();
+    render(App);
+    await waitFor(() => expect(tabLabels()).toEqual(["Home"]));
+
+    await fireEvent(
+      screen.getByRole("button", { name: /^Compras/ }),
+      new MouseEvent("auxclick", { button: 1, bubbles: true, cancelable: true }),
+    );
+
+    await waitFor(() => expect(tabLabels()).toEqual(["Home", "Compras"]));
+  });
+
+  test("a workspace already open is focused instead of duplicated", async () => {
+    shell();
+    render(App);
+    await waitFor(() => expect(tabLabels()).toEqual(["Home"]));
+
+    await userEvent.click(screen.getByRole("button", { name: "Tasks" }));
+    await waitFor(() => expect(tabLabels()).toEqual(["Home", "Tasks"]));
+
     await userEvent.click(screen.getByRole("button", { name: "Home" }));
-    expect(tabLabels()).toEqual(["Home", "Compras"]);
+    expect(tabLabels()).toEqual(["Home", "Tasks"]);
     expect(screen.getAllByRole("tab")[0].getAttribute("aria-selected")).toBe("true");
   });
 
@@ -1440,7 +1490,7 @@ describe("App shell with tabs", () => {
     render(App);
     await waitFor(() => expect(tabLabels().length).toBe(1));
 
-    await userEvent.click(screen.getByRole("button", { name: /^Compras/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Tasks" }));
     await waitFor(() => expect(tabLabels().length).toBe(2));
 
     await userEvent.click(screen.getAllByLabelText("close tab")[1]);
@@ -1474,19 +1524,145 @@ describe("App shell with tabs", () => {
     expect(screen.getByText("delete list")).toBeTruthy();
   });
 
-  test("the Inbox offers no delete in the page menu", async () => {
-    // It is recreated on every open, so offering to delete it would lie.
+  test("Tasks is one entry with the three views inside it", async () => {
+    // Today and This Week are views of the same tasks, not places of their
+    // own, so the sidebar says so with one entry and three buttons.
     shell();
     render(App);
     await waitFor(() => expect(tabLabels().length).toBe(1));
 
-    await userEvent.click(screen.getByRole("button", { name: /^Inbox/ }));
-    await userEvent.click(await screen.findByLabelText("page menu"));
+    expect(screen.queryByRole("button", { name: "Week" })).toBeNull();
 
-    expect(screen.queryByText("delete list")).toBeNull();
-    expect(screen.queryByText("rename list")).toBeNull();
-    // The menu still exists — it just offers what makes sense here. Two
-    // matches: the sidebar button and the one the menu added.
-    expect(screen.getAllByText("+ new list").length).toBe(2);
+    await userEvent.click(screen.getByRole("button", { name: "Tasks" }));
+    expect(await screen.findByRole("button", { name: "Today" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Week" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Inbox" })).toBeTruthy();
+
+    // Switching view stays inside the tab — it is looking around one
+    // document, not opening another.
+    await userEvent.click(screen.getByRole("button", { name: "Week" }));
+    expect(tabLabels()).toEqual(["Home", "Tasks"]);
+  });
+});
+
+describe("PageHeader", () => {
+  const props = (extra = {}) => ({
+    title: "Compras",
+    subtitle: "",
+    canBack: false,
+    canForward: false,
+    onBack: noop,
+    onForward: noop,
+    menu: [{ label: "rename list", run: noop }],
+    ...extra,
+  });
+
+  test("the menu closes when the page changes", async () => {
+    // A menu left hanging over a screen the user has already left would act
+    // on the wrong thing.
+    const { rerender } = render(PageHeader, { props: props() });
+
+    await userEvent.click(screen.getByLabelText("page menu"));
+    expect(await screen.findByText("rename list")).toBeTruthy();
+
+    await rerender(props({ title: "Mercado" }));
+    await waitFor(() => expect(screen.queryByText("rename list")).toBeNull());
+  });
+
+  test("picking an item runs it and closes the menu", async () => {
+    let ran = 0;
+    render(PageHeader, { props: props({ menu: [{ label: "go", run: () => ran++ }] }) });
+
+    await userEvent.click(screen.getByLabelText("page menu"));
+    await userEvent.click(await screen.findByText("go"));
+
+    expect(ran).toBe(1);
+    expect(screen.queryByText("go")).toBeNull();
+  });
+
+  test("the title renames the document when it can be renamed", async () => {
+    let renamed = 0;
+    render(PageHeader, { props: props({ onRenameTitle: () => renamed++ }) });
+
+    await userEvent.click(screen.getByRole("button", { name: /Compras/ }));
+    expect(renamed).toBe(1);
+  });
+
+  test("a title with no rename is plain text, not a button", async () => {
+    render(PageHeader, { props: props() });
+    expect(screen.queryByRole("button", { name: /Compras/ })).toBeNull();
+  });
+});
+
+describe("TabBar", () => {
+  const tab = (title) => ({ views: [{ kind: "list", list: `Tasks/${title}.md` }], at: 0 });
+  const titleOf = (v) => v.list.replace("Tasks/", "").replace(".md", "");
+
+  const props = (extra = {}) => ({
+    tabs: [tab("Um"), tab("Dois"), tab("Tres")],
+    active: 0,
+    titleOf,
+    onSelect: noop,
+    onClose: noop,
+    onMove: noop,
+    ...extra,
+  });
+
+  test("closing freezes the widths so the next × lands under the pointer", async () => {
+    // The browser behaviour worth copying: closing several tabs in a row is
+    // one gesture instead of a hunt.
+    const closed = [];
+    const { container } = render(TabBar, {
+      props: props({ onClose: (i) => closed.push(i) }),
+    });
+
+    await userEvent.click(screen.getAllByLabelText("close tab")[1]);
+
+    expect(closed).toEqual([1]);
+    const widths = [...container.querySelectorAll(".tab")].map((el) => el.style.width);
+    expect(widths.every((w) => w !== "")).toBe(true);
+
+    // Leaving the bar releases them, so the tabs breathe again.
+    await fireEvent.mouseLeave(container.querySelector(".tabbar-outer"));
+    const after = [...container.querySelectorAll(".tab")].map((el) => el.style.width);
+    expect(after.every((w) => w === "")).toBe(true);
+  });
+
+  test("middle click closes a tab", async () => {
+    const closed = [];
+    render(TabBar, { props: props({ onClose: (i) => closed.push(i) }) });
+
+    await fireEvent(
+      screen.getAllByRole("tab")[2].closest(".tab"),
+      new MouseEvent("auxclick", { button: 1, bubbles: true, cancelable: true }),
+    );
+
+    expect(closed).toEqual([2]);
+  });
+
+  test("dragging a tab onto another reports the move", async () => {
+    const moves = [];
+    const { container } = render(TabBar, {
+      props: props({ onMove: (from, to) => moves.push([from, to]) }),
+    });
+
+    const els = container.querySelectorAll(".tab");
+    await fireEvent.dragStart(els[0]);
+    await fireEvent.drop(els[2]);
+
+    expect(moves).toEqual([[0, 2]]);
+  });
+
+  test("a tab dropped on itself moves nothing", async () => {
+    const moves = [];
+    const { container } = render(TabBar, {
+      props: props({ onMove: (from, to) => moves.push([from, to]) }),
+    });
+
+    const els = container.querySelectorAll(".tab");
+    await fireEvent.dragStart(els[1]);
+    await fireEvent.drop(els[1]);
+
+    expect(moves).toEqual([]);
   });
 });

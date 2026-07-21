@@ -94,6 +94,23 @@ export function close(tabs, active, index) {
   return { tabs: next, active: at };
 }
 
+/// Moves a tab, keeping the same one focused.
+export function move(tabs, active, from, to) {
+  if (from === to || from < 0 || to < 0 || from >= tabs.length || to >= tabs.length) {
+    return { tabs, active };
+  }
+  const next = [...tabs];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+
+  // Follow the tab the user was on, wherever it ended up.
+  let at = active;
+  if (active === from) at = to;
+  else if (from < active && to >= active) at = active - 1;
+  else if (from > active && to <= active) at = active + 1;
+  return { tabs: next, active: at };
+}
+
 /// Replaces the view of whichever tab is showing `fromId`.
 ///
 /// Used when a document is renamed under an open tab: the tab must follow the
