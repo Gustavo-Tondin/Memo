@@ -459,6 +459,44 @@ describe("TaskInspector", () => {
     await waitFor(() => expect(lastSave().fields.due).toBe(null));
   });
 
+  test("the date has its own way to be removed", async () => {
+    // The picker can set a date but has no gesture for "none", so without
+    // this button a date could be changed forever and never taken off.
+    bridge({ set_task_fields: null });
+
+    render(TaskInspector, {
+      props: props(task("a1", "Comprar leite", { due: "2026-07-25" })),
+    });
+
+    await userEvent.click(await screen.findByLabelText("limpar data"));
+
+    await waitFor(() => expect(lastSave().fields.due).toBe(null));
+  });
+
+  test("no clear button is offered when there is no date", async () => {
+    bridge({ set_task_fields: null });
+
+    render(TaskInspector, { props: props(task("a1", "Comprar leite")) });
+
+    await screen.findByLabelText("Data");
+    expect(screen.queryByLabelText("limpar data")).toBeNull();
+  });
+
+  test("choosing a date drops focus so the calendar closes", async () => {
+    // The WebKitGTK picker has no confirm button and stays open on top of the
+    // panel; blurring is the only thing that dismisses it.
+    bridge({ set_task_fields: null });
+
+    render(TaskInspector, { props: props(task("a1", "Comprar leite")) });
+
+    const field = await screen.findByLabelText("Data");
+    field.focus();
+    await fireEvent.change(field, { target: { value: "2026-08-01" } });
+
+    expect(document.activeElement).not.toBe(field);
+    await waitFor(() => expect(lastSave().fields.due).toBe("2026-08-01"));
+  });
+
   test("a tag with spaces is stored as a single token", async () => {
     // A loose word on the metadata line stops it from being all-tokens, and
     // the next read turns the whole line into a description — losing the
@@ -688,18 +726,33 @@ describe("App", () => {
     );
   });
 
-  test("only the empty space closes the panel", async () => {
+  test("clicking away does not close the panel", async () => {
+    // Tried and removed: even scoped to the empty space it fired too easily,
+    // and losing a half-typed task costs more than the shortcut is worth.
+    // Kept as a test so it does not come back by accident.
     shell();
     const { container } = render(App);
 
     await openTask("Comprar leite");
 
-    // A control inside a screen keeps the panel open…
     await userEvent.click(screen.getByPlaceholderText("Nova tarefa…"));
+    await fireEvent.click(container.querySelector(".content"));
+
+    expect(screen.queryByLabelText("nome da tarefa")).not.toBeNull();
+  });
+
+  test("escape closes the panel, except from inside a date field", async () => {
+    // The native picker uses Escape to dismiss itself; closing the whole
+    // panel from under it would undo the edit the user came to make.
+    shell();
+    render(App);
+
+    await openTask("Comprar leite");
+
+    await fireEvent.keyDown(screen.getByLabelText("Data"), { key: "Escape" });
     expect(screen.queryByLabelText("nome da tarefa")).not.toBeNull();
 
-    // …and the bare content area closes it.
-    await fireEvent.click(container.querySelector(".content"));
+    await fireEvent.keyDown(document.body, { key: "Escape" });
     await waitFor(() => expect(screen.queryByLabelText("nome da tarefa")).toBeNull());
   });
 

@@ -23,20 +23,19 @@
 
   const select = (list, task) => (selected = { list, task });
 
-  // Only the empty space closes the panel: `target === currentTarget` means
-  // the click landed on the content area itself and not on anything drawn in
-  // it. Clicking another task opens that one, and clicking a checkbox, a
-  // button or a field inside a screen does what it says and nothing else.
+  // Closing the inspector by clicking away was tried and removed on
+  // 2026-07-21: even scoped to the empty space it fired too easily, and losing
+  // the panel mid-edit costs more than the convenience is worth. It is written
+  // down as `closeInspectorOnClickAway` in config.md, default off, to be
+  // decided again when there is a settings screen to turn it on from.
   //
-  // Checking the target beats hanging `stopPropagation` on every control —
-  // that list is never complete, and each thing forgotten silently closes a
-  // panel the user was typing into.
-  const clickedAway = (event) => {
-    if (event.target === event.currentTarget) selected = null;
-  };
-
+  // What closes it now: the × in the panel, Escape, and changing screen.
   function onKeydown(event) {
-    if (event.key === "Escape" && selected) selected = null;
+    if (event.key !== "Escape" || !selected) return;
+    // A native date picker eats Escape to dismiss its own popup. Closing the
+    // whole panel from under it would undo the edit the user came to make.
+    if (event.target?.type === "date") return;
+    selected = null;
   }
 
   /// A screen as a string, so the shell can store it without knowing what a
@@ -276,9 +275,7 @@
         <button class="secondary" onclick={chooseFolder}>trocar caderno…</button>
       </nav>
 
-      <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <!-- svelte-ignore a11y_click_events_have_key_events -->
-      <section class="content" onclick={clickedAway}>
+      <section class="content">
         {#if error}
           <p class="error">{error} <button onclick={() => (error = null)}>ok</button></p>
         {/if}

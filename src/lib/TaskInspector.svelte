@@ -156,6 +156,22 @@
     return `every-${every}-${draft.repeatUnit}s`;
   }
 
+  /// Takes the chosen date and gets the calendar out of the way.
+  ///
+  /// The native picker in WebKitGTK has no confirm button and does not close
+  /// itself once a day is clicked — the only way out was clicking outside the
+  /// whole window. Dropping focus dismisses it.
+  function pickDate(event) {
+    draft.due = event.currentTarget.value;
+    event.currentTarget.blur();
+  }
+
+  /// Removing a date needs its own control: the field shows a whole date or
+  /// nothing, and there is no keystroke in the picker that means "none".
+  function clearDate() {
+    draft.due = "";
+  }
+
   /// A tag with a space in it would break the metadata line on the next read:
   /// the loose word stops the line from being all-tokens, and the whole thing
   /// turns into a description. Cheaper to fix the tag than to lose the fields.
@@ -274,16 +290,24 @@
   <section class="fields">
     <label>
       Data
-      <!-- `onchange`, not `bind:value`: a date field emits `input` for every
-           half-typed value while the picker is open, so binding it would save
-           an empty date between choosing the month and choosing the day.
-           `change` only fires once the value is a whole date, or cleared. -->
-      <input
-        type="date"
-        value={draft.due}
-        onchange={(e) => (draft.due = e.currentTarget.value)}
-        disabled={readOnly}
-      />
+      <span class="date">
+        <!-- `onchange`, not `bind:value`: a date field emits `input` for every
+             half-typed value while the picker is open, so binding it would
+             save an empty date between choosing the month and choosing the
+             day. `change` only fires once the value is a whole date, or
+             cleared. -->
+        <input
+          type="date"
+          value={draft.due}
+          onchange={pickDate}
+          disabled={readOnly}
+        />
+        {#if !readOnly && draft.due}
+          <button onclick={clearDate} aria-label="limpar data" title="limpar"
+            >×</button
+          >
+        {/if}
+      </span>
     </label>
 
     <label>
@@ -403,9 +427,19 @@
     align-items: center;
     gap: 0.5rem;
   }
+  .date,
   .repeat {
     display: flex;
+    align-items: center;
     gap: 0.25rem;
+  }
+  .date button {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #666;
+    font-size: 1rem;
+    padding: 0 0.15rem;
   }
   .repeat input {
     width: 3.5rem;
