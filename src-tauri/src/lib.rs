@@ -24,6 +24,7 @@ pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
             commands::core_version,
             commands::is_notebook_open,
             commands::notebook_snapshot,
+            commands::workspaces,
             // notebook
             commands::pick_notebook_folder,
             commands::open_notebook,

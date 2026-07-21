@@ -30,6 +30,19 @@ export const S = {
     "open the folder and decide which version stays.",
   dismissError: "ok",
 
+  // Workspaces (phase 7.5)
+  workspacesTitle: "Workspaces",
+  readOnlyWorkspace: "read-only (newer version)",
+  emptyWorkspace: "This workspace has no widgets yet.",
+  unsupportedWidgetTitle: (kind) =>
+    kind ? `"${kind}" widget` : "Widget without a type",
+  unsupportedWidgetBody:
+    "This version of Memo does not know how to show this widget. " +
+    "Its files are untouched — a newer version may support it.",
+  invalidWidgetFolder:
+    "This widget's folder points outside the workspace, so it was not loaded.",
+  widgetNoLists: "No lists in this widget yet.",
+
   // Lists
   newTaskPlaceholder: "New task…",
   addTask: "Add",

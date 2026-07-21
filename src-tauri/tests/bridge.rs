@@ -744,3 +744,97 @@ fn hostile_fields_are_normalized_by_the_core_not_trusted_to_the_ui() {
     assert_eq!(tasks[0]["text"], "Comprar material");
     assert_eq!(tasks[0]["subtasks"][0]["text"], "Cimento CP-II");
 }
+
+#[test]
+fn a_hand_written_workspace_crosses_the_bridge_intact() {
+    // Phase 7.5, written BEFORE the command it tests (the roadmap says so):
+    // the community-template promise end to end. A hand-written workspace
+    // with two tasks widgets and an invented type must open, expose both,
+    // flag the third as unknown — and the file on disk must not change by
+    // one byte for having been looked at.
+    let (_lock, app, dir) = app_with_notebook();
+
+    let config = r#"{
+  "schemaVersion": 1,
+  "name": "Project A",
+  "widgets": [
+    { "type": "tasks", "folder": "Backlog" },
+    { "type": "tasks", "folder": "Bugs", "options": { "showCompleted": true } },
+    { "type": "hologram", "folder": "Cards", "shader": "neon" }
+  ]
+}"#;
+    let ws = dir.path().join("Project A");
+    std::fs::create_dir_all(ws.join("Backlog")).unwrap();
+    std::fs::write(ws.join(".workspace.json"), config).unwrap();
+    std::fs::write(ws.join("Backlog/Sprint.md"), "- [ ] shipar\n").unwrap();
+
+    let workspaces = ok(&app, "workspaces", json!({}));
+    let list = workspaces.as_array().unwrap();
+
+    // The three fixed ones plus the hand-written one, flagged apart.
+    let fixed: Vec<&str> = list
+        .iter()
+        .filter(|w| w["fixed"] == json!(true))
+        .map(|w| w["folderName"].as_str().unwrap())
+        .collect();
+    assert_eq!(fixed, vec!["Home", "Notes", "Tasks"]);
+
+    let project = list
+        .iter()
+        .find(|w| w["folderName"] == "Project A")
+        .expect("the hand-written workspace must be discovered");
+    assert_eq!(project["name"], "Project A");
+    assert_eq!(project["fixed"], json!(false));
+
+    let widgets = project["widgets"].as_array().unwrap();
+    assert_eq!(widgets.len(), 3, "order and membership follow the config");
+    assert_eq!(widgets[0]["kind"], "tasks");
+    assert_eq!(widgets[0]["known"], json!(true));
+    assert_eq!(widgets[0]["folder"], "Project A/Backlog");
+    assert_eq!(widgets[1]["options"]["showCompleted"], json!(true));
+    assert_eq!(widgets[2]["kind"], "hologram");
+    assert_eq!(widgets[2]["known"], json!(false), "unknown, never dropped");
+
+    // Its lists joined the notebook, addressed by path.
+    let lists = ok(&app, "list_names", json!({}));
+    assert!(lists
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|l| l["path"] == "Project A/Backlog/Sprint.md"));
+
+    // And looking never wrote: the template is byte-for-byte the author's.
+    let on_disk = std::fs::read_to_string(ws.join(".workspace.json")).unwrap();
+    assert_eq!(on_disk, config, "opening a workspace must not rewrite it");
+}
+
+#[test]
+fn a_widget_folder_that_tries_to_escape_is_flagged_not_fatal() {
+    // A malicious or broken template must not take the workspace down — and
+    // must never resolve outside the notebook.
+    let (_lock, app, dir) = app_with_notebook();
+    let ws = dir.path().join("Evil");
+    std::fs::create_dir_all(&ws).unwrap();
+    std::fs::write(
+        ws.join(".workspace.json"),
+        r#"{ "schemaVersion": 1, "widgets": [
+            { "type": "tasks", "folder": "../../etc" },
+            { "type": "tasks", "folder": "Ok" }
+        ] }"#,
+    )
+    .unwrap();
+
+    let workspaces = ok(&app, "workspaces", json!({}));
+    let evil = workspaces
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["folderName"] == "Evil")
+        .unwrap()
+        .clone();
+
+    let widgets = evil["widgets"].as_array().unwrap();
+    assert_eq!(widgets[0]["folder"], Value::Null, "the escape resolves to nothing");
+    assert_eq!(widgets[0]["invalidFolder"], json!(true));
+    assert_eq!(widgets[1]["folder"], "Evil/Ok", "the healthy sibling still works");
+}

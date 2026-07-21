@@ -7,6 +7,7 @@
   import PeriodView from "./lib/PeriodView.svelte";
   import CompletedView from "./lib/CompletedView.svelte";
   import TaskInspector from "./lib/TaskInspector.svelte";
+  import WorkspaceView from "./lib/WorkspaceView.svelte";
   import { listName } from "./lib/paths.js";
   import { S } from "./lib/strings.js";
 
@@ -19,6 +20,7 @@
   let reloadKey = $state(0);
   let counts = $state({});
   let conflicts = $state([]);
+  let workspaces = $state([]);
   /// The task open in the right-hand panel, as `{ list, task }`.
   let selected = $state(null);
 
@@ -44,6 +46,7 @@
   function viewToId(v) {
     if (v.kind === "period") return v.period;
     if (v.kind === "list") return `list:${v.list}`;
+    if (v.kind === "workspace") return `ws:${v.ws}`;
     return v.kind;
   }
 
@@ -52,6 +55,7 @@
     if (id === "day" || id === "week") return { kind: "period", period: id };
     if (id === "completed") return { kind: "completed" };
     if (id.startsWith("list:")) return { kind: "list", list: id.slice(5) };
+    if (id.startsWith("ws:")) return { kind: "workspace", ws: id.slice(3) };
     return null;
   }
 
@@ -88,8 +92,19 @@
   );
 
   let userLists = $derived(
-    (notebook?.lists ?? []).filter((entry) => entry.path !== layout.completed),
+    (notebook?.lists ?? []).filter(
+      (entry) =>
+        entry.path !== layout.completed &&
+        // Lists of user workspaces are reached through their workspace, not
+        // flattened into the fixed sidebar — two Inboxes side by side with
+        // the same label would be unreadable.
+        entry.path.startsWith(`${layout.tasksFolder}/`),
+    ),
   );
+
+  // User workspaces get the generic widget runtime; the three fixed ones
+  // keep their dedicated navigation until the phase 8.5 shell.
+  let userWorkspaces = $derived(workspaces.filter((ws) => !ws.fixed));
 
   function fail(e) {
     error = describeError(e);
@@ -108,6 +123,7 @@
       clock = snap.clock;
       counts = snap.counts;
       conflicts = snap.conflicts;
+      workspaces = snap.workspaces ?? [];
     } catch {
       // No notebook open (or it just closed): back to onboarding.
       notebook = null;
@@ -288,6 +304,19 @@
           </button>
         {/each}
 
+        {#if userWorkspaces.length > 0}
+          <hr />
+          <small class="section">{S.workspacesTitle}</small>
+          {#each userWorkspaces as ws (ws.folderName)}
+            <button
+              class:active={view.kind === "workspace" && view.ws === ws.folderName}
+              onclick={() => (view = { kind: "workspace", ws: ws.folderName })}
+            >
+              {ws.name}
+            </button>
+          {/each}
+        {/if}
+
         <hr />
         <button
           class:active={view.kind === "completed"}
@@ -352,6 +381,19 @@
               <button onclick={renameCurrentList}>{S.renameList}</button>
               <button onclick={deleteCurrentList}>{S.deleteList}</button>
             </p>
+          {/if}
+        {:else if view.kind === "workspace"}
+          {@const current = userWorkspaces.find((w) => w.folderName === view.ws)}
+          {#if current}
+            <WorkspaceView
+              workspace={current}
+              lists={notebook.lists}
+              {counts}
+              completedName={layout.completedName}
+              onOpenList={(path) => (view = { kind: "list", list: path })}
+            />
+          {:else}
+            <p class="empty-ws">{S.emptyWorkspace}</p>
           {/if}
         {:else}
           <CompletedView
@@ -433,6 +475,16 @@
   nav button.secondary {
     color: #555;
     font-size: 0.85rem;
+  }
+  .section {
+    color: #888;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.25rem 0.5rem 0;
+  }
+  .empty-ws {
+    color: #666;
   }
   .notebook {
     padding: 0.25rem 0.5rem 0.5rem;

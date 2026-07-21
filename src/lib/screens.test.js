@@ -19,6 +19,7 @@ const { default: PeriodView } = await import("./PeriodView.svelte");
 const { default: CompletedView } = await import("./CompletedView.svelte");
 const { default: TaskInspector } = await import("./TaskInspector.svelte");
 const { default: App } = await import("../App.svelte");
+const { default: WorkspaceView } = await import("./WorkspaceView.svelte");
 
 const task = (id, text, extra = {}) => ({
   id,
@@ -729,6 +730,7 @@ describe("App", () => {
         },
         counts: {},
         conflicts: [],
+        workspaces: [],
       },
       screen_to_restore: "list:Tasks/Inbox.md",
       list_tasks: [task("a1", "Comprar leite"), task("b2", "Pagar boleto")],
@@ -823,5 +825,156 @@ describe("App", () => {
     await userEvent.click(screen.getByText("Today"));
 
     await waitFor(() => expect(screen.queryByLabelText("task name")).toBeNull());
+  });
+});
+
+describe("WorkspaceView", () => {
+  // The exit criterion of phase 7.5, as a test: a hand-written workspace
+  // with two tasks widgets and an invented type opens, shows both, warns
+  // about the third — and nothing is hidden or dropped.
+  const workspace = {
+    folderName: "Project A",
+    name: "Project A",
+    fixed: false,
+    readOnly: false,
+    widgets: [
+      { kind: "tasks", known: true, folder: "Project A/Backlog", invalidFolder: false, options: null },
+      { kind: "tasks", known: true, folder: "Project A/Bugs", invalidFolder: false, options: null },
+      { kind: "hologram", known: false, folder: "Project A/Cards", invalidFolder: false, options: null },
+    ],
+  };
+
+  const lists = [
+    { path: "Project A/Backlog/Sprint.md", name: "Sprint" },
+    { path: "Project A/Backlog/Completed.md", name: "Completed" },
+    { path: "Project A/Bugs/Open.md", name: "Open" },
+    { path: "Tasks/Inbox.md", name: "Inbox" },
+  ];
+
+  test("renders every widget in config order, unknown included", async () => {
+    render(WorkspaceView, { props: { workspace, lists, counts: {}, onOpenList: noop } });
+
+    // Both tasks widgets show their own lists — and only their own.
+    expect(await screen.findByText("Sprint")).toBeTruthy();
+    expect(screen.getByText("Open")).toBeTruthy();
+    expect(screen.queryByText("Inbox")).toBeNull();
+
+    // The invented type is shown and named, never silently dropped.
+    expect(screen.getByText('"hologram" widget')).toBeTruthy();
+  });
+
+  test("a widget's own Completed is not offered as a list", async () => {
+    render(WorkspaceView, { props: { workspace, lists, counts: {}, onOpenList: noop } });
+
+    await screen.findByText("Sprint");
+    expect(screen.queryByText("Completed")).toBeNull();
+  });
+
+  test("clicking a list hands its address up", async () => {
+    const opened = [];
+    render(WorkspaceView, {
+      props: { workspace, lists, counts: {}, onOpenList: (p) => opened.push(p) },
+    });
+
+    await userEvent.click(await screen.findByText("Sprint"));
+    expect(opened).toEqual(["Project A/Backlog/Sprint.md"]);
+  });
+
+  test("an escaping folder shows a warning, not a broken widget", async () => {
+    const evil = {
+      ...workspace,
+      widgets: [
+        { kind: "tasks", known: true, folder: null, invalidFolder: true, options: null },
+      ],
+    };
+    render(WorkspaceView, { props: { workspace: evil, lists, counts: {}, onOpenList: noop } });
+
+    expect(
+      await screen.findByText(
+        "This widget's folder points outside the workspace, so it was not loaded.",
+      ),
+    ).toBeTruthy();
+  });
+});
+
+describe("App with a user workspace", () => {
+  const notebook = {
+    path: "/n",
+    name: "n",
+    readOnly: false,
+    lists: [
+      { path: "Tasks/Inbox.md", name: "Inbox" },
+      { path: "Tasks/Completed.md", name: "Completed" },
+      { path: "Project A/Backlog/Sprint.md", name: "Sprint" },
+    ],
+    layout: {
+      inbox: "Tasks/Inbox.md",
+      completed: "Tasks/Completed.md",
+      tasksFolder: "Tasks",
+      completedName: "Completed",
+    },
+  };
+
+  const shell = () =>
+    bridge({
+      last_notebook: "/n",
+      open_notebook: notebook,
+      notebook_snapshot: {
+        info: notebook,
+        clock: {
+          today: "2026-07-21",
+          weekStart: "2026-07-20",
+          nextDailyTurn: "2026-07-22T00:00:00Z",
+          nextWeeklyTurn: "2026-07-27T00:00:00Z",
+        },
+        counts: {},
+        conflicts: [],
+        workspaces: [
+          { folderName: "Home", name: "Home", fixed: true, readOnly: false, widgets: [] },
+          {
+            folderName: "Project A",
+            name: "Project A",
+            fixed: false,
+            readOnly: false,
+            widgets: [
+              { kind: "tasks", known: true, folder: "Project A/Backlog", invalidFolder: false, options: null },
+            ],
+          },
+        ],
+      },
+      screen_to_restore: null,
+      list_tasks: [],
+      period_tasks: [],
+      grouped_suggestions: [],
+    });
+
+  test("a user workspace appears in the sidebar and opens its widgets", async () => {
+    shell();
+    render(App);
+
+    // Fixed workspaces never show in the generic section.
+    await screen.findByText("Project A");
+    expect(screen.queryByText("Home")).toBeNull();
+
+    await userEvent.click(screen.getByText("Project A"));
+    expect(await screen.findByText("Sprint")).toBeTruthy();
+
+    // And its lists are not flattened into the fixed sidebar.
+    const sidebarInbox = screen.getAllByText("Inbox");
+    expect(sidebarInbox.length).toBe(1);
+  });
+
+  test("opening a list from the workspace lands on the list screen", async () => {
+    shell();
+    render(App);
+
+    await userEvent.click(await screen.findByText("Project A"));
+    await userEvent.click(await screen.findByText("Sprint"));
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("list_tasks", {
+        list: "Project A/Backlog/Sprint.md",
+      }),
+    );
   });
 });

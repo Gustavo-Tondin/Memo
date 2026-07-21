@@ -34,6 +34,9 @@ pub struct NotebookLayout {
     pub completed: String,
     /// The folder new lists are created in, until the UI is workspace-aware.
     pub tasks_folder: String,
+    /// The per-folder completed list's NAME (`Completed`) — every tasks
+    /// widget has one, and the UI must not hard-code it (the names.js lesson).
+    pub completed_name: String,
 }
 
 /// What the frontend needs to know about the open notebook.
@@ -65,6 +68,7 @@ impl NotebookInfo {
                 inbox: Notebook::inbox_path(),
                 completed: Notebook::completed_path_of(&Notebook::inbox_path())?,
                 tasks_folder: memo_core::TASKS_DIR.to_string(),
+                completed_name: memo_core::COMPLETED_LIST.to_string(),
             },
         })
     }
@@ -610,6 +614,85 @@ pub fn is_notebook_open(state: State<'_, AppState>) -> bool {
     state.is_open()
 }
 
+/// A widget as the frontend renders it (phase 7.5).
+///
+/// `kind` is whatever the config says — an unknown one is delivered, not
+/// dropped, so the UI can show its "unsupported" card and the folder stays
+/// untouched. `folder` arrives resolved to a root-relative path; a folder
+/// that tried to escape the workspace resolves to `None` with
+/// `invalid_folder` set — a broken template must not take the workspace down.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WidgetInfo {
+    pub kind: String,
+    pub known: bool,
+    pub folder: Option<String>,
+    pub invalid_folder: bool,
+    pub options: serde_json::Value,
+}
+
+/// A workspace as the navigation shows it.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceInfo {
+    /// The folder — the stable identity; renaming the folder renames the
+    /// workspace.
+    pub folder_name: String,
+    /// What the user reads (config `name`, falling back to the folder).
+    pub name: String,
+    /// One of the three the app creates and recreates (Home, Tasks, Notes).
+    /// The UI gives these dedicated navigation; user workspaces get the
+    /// generic widget runtime.
+    pub fixed: bool,
+    pub read_only: bool,
+    pub widgets: Vec<WidgetInfo>,
+}
+
+/// The workspaces of the notebook, ready to render.
+#[tauri::command]
+pub fn workspaces(state: State<'_, AppState>) -> CommandResult<Vec<WorkspaceInfo>> {
+    state.with_notebook(|nb| Ok(workspaces_of(nb)?))
+}
+
+fn workspaces_of(nb: &Notebook) -> CommandResult<Vec<WorkspaceInfo>> {
+    const FIXED: [&str; 3] = ["Home", memo_core::TASKS_DIR, memo_core::NOTES_DIR];
+
+    let mut out = Vec::new();
+    for workspace in nb.workspaces()? {
+        let widgets = workspace
+            .config
+            .widgets
+            .iter()
+            .map(|spec| {
+                let resolved = workspace.widget_dir(spec);
+                let invalid = resolved.is_err();
+                let folder = resolved.ok().flatten().map(|dir| {
+                    dir.strip_prefix(nb.root())
+                        .unwrap_or(&dir)
+                        .to_string_lossy()
+                        .replace('\\', "/")
+                });
+                WidgetInfo {
+                    kind: spec.kind.clone(),
+                    known: spec.is_known(),
+                    folder,
+                    invalid_folder: invalid,
+                    options: spec.options.clone(),
+                }
+            })
+            .collect();
+
+        out.push(WorkspaceInfo {
+            folder_name: workspace.folder_name().to_string(),
+            name: workspace.display_name().to_string(),
+            fixed: FIXED.contains(&workspace.folder_name()),
+            read_only: workspace.config.is_read_only(),
+            widgets,
+        });
+    }
+    Ok(out)
+}
+
 /// Everything the shell of the UI needs after any change, in one round trip.
 ///
 /// Every action used to fan out into four `invoke()`s (info, clock, counts,
@@ -625,6 +708,7 @@ pub struct NotebookSnapshot {
     /// Empty when the user turned the counters off.
     pub counts: std::collections::BTreeMap<String, usize>,
     pub conflicts: Vec<Conflict>,
+    pub workspaces: Vec<WorkspaceInfo>,
 }
 
 #[tauri::command]
@@ -639,6 +723,7 @@ pub fn notebook_snapshot(state: State<'_, AppState>) -> CommandResult<NotebookSn
                 Default::default()
             },
             conflicts: nb.conflicts()?,
+            workspaces: workspaces_of(nb)?,
         })
     })
 }
