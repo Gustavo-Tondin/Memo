@@ -1,5 +1,6 @@
 <script>
   import { listName } from "./paths.js";
+  import { formatDate } from "./dates.js";
   import { S } from "./strings.js";
 
   // One task line. Knows how to render and edit itself; every action is a
@@ -16,6 +17,7 @@
     onComplete,
     onEdit,
     onSelect,
+    dateFormat = "dd-mm-yyyy",
     children,
   } = $props();
 
@@ -55,12 +57,6 @@
     ),
   );
 
-  // The file always stores ISO; display follows the user's preference, which
-  // arrives already resolved from the shell. Default until settings exist.
-  function formatDate(iso) {
-    const [y, m, d] = iso.split("-");
-    return `${d}-${m}-${y}`;
-  }
 </script>
 
 <li class:selected>
@@ -100,7 +96,7 @@
      the order here is already the one it should keep. -->
 {#if hasFields}
   <li class="fields">
-    {#if task.due}<span class="due">{formatDate(task.due)}</span>{/if}
+    {#if task.due}<span class="due">{formatDate(task.due, dateFormat)}</span>{/if}
     {#if task.repeat}<span class="repeat" title={S.repeatsHint}>↻</span>{/if}
     {#if task.priority}<span class="prio">!{task.priority}</span>{/if}
     {#if task.subtasks?.length}

@@ -21,6 +21,7 @@
     onError,
     onSelect,
     selectedId = null,
+    dateFormat = "dd-mm-yyyy",
   } = $props();
 
   const SUBS = [
@@ -49,6 +50,7 @@
     {onError}
     {onSelect}
     {selectedId}
+    {dateFormat}
   />
 {:else}
   <PeriodView
@@ -60,6 +62,7 @@
     {onError}
     {onSelect}
     {selectedId}
+    {dateFormat}
   />
 {/if}
 

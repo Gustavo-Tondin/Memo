@@ -70,6 +70,56 @@ pub struct Rollover {
     pub weekly: WeeklyRollover,
 }
 
+/// How a date is shown. The file always stores ISO; this is display only.
+///
+/// A closed set rather than a free pattern, for the same reason the repeat
+/// field is a select: a value the app cannot parse would have to fall back
+/// silently, and a date shown wrong is worse than a date shown plainly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DateFormat {
+    /// `25-07-2026`
+    #[default]
+    DayMonthYear,
+    /// `25/07/2026`
+    DayMonthYearSlash,
+    /// `07/25/2026`
+    MonthDayYear,
+    /// `2026-07-25` — the same form the file uses.
+    Iso,
+}
+
+impl DateFormat {
+    pub fn parse_or_default(text: &str) -> Self {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "dd/mm/yyyy" => Self::DayMonthYearSlash,
+            "mm/dd/yyyy" => Self::MonthDayYear,
+            "yyyy-mm-dd" => Self::Iso,
+            _ => Self::DayMonthYear,
+        }
+    }
+
+    pub fn render(self) -> &'static str {
+        match self {
+            Self::DayMonthYear => "dd-mm-yyyy",
+            Self::DayMonthYearSlash => "dd/mm/yyyy",
+            Self::MonthDayYear => "mm/dd/yyyy",
+            Self::Iso => "yyyy-mm-dd",
+        }
+    }
+
+    /// Formats a date for display.
+    pub fn format(self, date: chrono::NaiveDate) -> String {
+        use chrono::Datelike;
+        let (d, m, y) = (date.day(), date.month(), date.year());
+        match self {
+            Self::DayMonthYear => format!("{d:02}-{m:02}-{y}"),
+            Self::DayMonthYearSlash => format!("{d:02}/{m:02}/{y}"),
+            Self::MonthDayYear => format!("{m:02}/{d:02}/{y}"),
+            Self::Iso => format!("{y}-{m:02}-{d:02}"),
+        }
+    }
+}
+
 /// A notebook's config file, in memory.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -91,6 +141,17 @@ pub struct Config {
     /// paints deadlines red on its own more stressful than useful. The
     /// `#urgent` tag written by hand always counts, either way.
     pub auto_urgent_by_date: bool,
+    /// How dates are shown. The file always stores ISO.
+    pub date_display_format: DateFormat,
+    /// Close the task panel when clicking outside it.
+    ///
+    /// Off by default, and that default is a decision: it shipped on, fired
+    /// too easily, and losing a half-typed task cost more than the shortcut
+    /// was worth (2026-07-21). Kept as an option because the gesture is
+    /// muscle memory for some people.
+    pub close_inspector_on_click_away: bool,
+    /// Where the Home's quick capture writes, relative to the notes widget.
+    pub quick_note_folder: String,
     /// The document exactly as it was read, so keys this build does not know
     /// about are written back instead of being silently dropped. This is what
     /// protects a notebook opened by two different app versions.
@@ -105,6 +166,9 @@ impl Default for Config {
             restore_last_screen: false,
             show_list_counts: true,
             auto_urgent_by_date: true,
+            date_display_format: DateFormat::default(),
+            close_inspector_on_click_away: false,
+            quick_note_folder: crate::notefolder::NOTES_INBOX.to_string(),
             raw: Map::new(),
         }
     }
@@ -165,6 +229,22 @@ impl Config {
                 "autoUrgentByDate",
                 defaults.auto_urgent_by_date,
             ),
+            date_display_format: raw
+                .get("dateDisplayFormat")
+                .and_then(Value::as_str)
+                .map(DateFormat::parse_or_default)
+                .unwrap_or_default(),
+            close_inspector_on_click_away: read_bool(
+                &raw,
+                "closeInspectorOnClickAway",
+                defaults.close_inspector_on_click_away,
+            ),
+            quick_note_folder: raw
+                .get("quickNoteFolder")
+                .and_then(Value::as_str)
+                .filter(|folder| !folder.trim().is_empty())
+                .unwrap_or(&defaults.quick_note_folder)
+                .to_string(),
             raw,
         }
     }
@@ -192,6 +272,18 @@ impl Config {
                 (
                     "autoUrgentByDate".to_string(),
                     Value::from(self.auto_urgent_by_date),
+                ),
+                (
+                    "dateDisplayFormat".to_string(),
+                    Value::from(self.date_display_format.render()),
+                ),
+                (
+                    "closeInspectorOnClickAway".to_string(),
+                    Value::from(self.close_inspector_on_click_away),
+                ),
+                (
+                    "quickNoteFolder".to_string(),
+                    Value::from(self.quick_note_folder.clone()),
                 ),
             ])),
         );
@@ -468,6 +560,52 @@ mod tests {
 
         let loaded = Config::load(&path);
         assert_eq!(loaded.rollover.weekly.at, TurnOffset::from_minutes(90));
+    }
+
+    #[test]
+    fn the_phase_nine_keys_round_trip_and_tolerate_garbage() {
+        let mut config = Config::default();
+        assert_eq!(config.date_display_format, DateFormat::DayMonthYear);
+        assert!(!config.close_inspector_on_click_away, "off by default");
+        assert_eq!(config.quick_note_folder, "Inbox");
+
+        config.date_display_format = DateFormat::Iso;
+        config.close_inspector_on_click_away = true;
+        config.quick_note_folder = "Clientes".into();
+
+        let reparsed = Config::parse(&config.render());
+        assert_eq!(reparsed.date_display_format, DateFormat::Iso);
+        assert!(reparsed.close_inspector_on_click_away);
+        assert_eq!(reparsed.quick_note_folder, "Clientes");
+
+        // A pattern the app cannot render falls back rather than showing a
+        // date wrong, and an empty folder is not a folder.
+        let broken = Config::parse(
+            r#"{ "schemaVersion": 1, "dateDisplayFormat": "banana",
+                 "quickNoteFolder": "  ", "closeInspectorOnClickAway": 7 }"#,
+        );
+        assert_eq!(broken.date_display_format, DateFormat::DayMonthYear);
+        assert_eq!(broken.quick_note_folder, "Inbox");
+        assert!(!broken.close_inspector_on_click_away);
+    }
+
+    #[test]
+    fn dates_render_in_every_offered_shape() {
+        let date = chrono::NaiveDate::from_ymd_opt(2026, 7, 5).unwrap();
+        assert_eq!(DateFormat::DayMonthYear.format(date), "05-07-2026");
+        assert_eq!(DateFormat::DayMonthYearSlash.format(date), "05/07/2026");
+        assert_eq!(DateFormat::MonthDayYear.format(date), "07/05/2026");
+        assert_eq!(DateFormat::Iso.format(date), "2026-07-05");
+
+        // Every offered value survives the config round trip.
+        for shape in [
+            DateFormat::DayMonthYear,
+            DateFormat::DayMonthYearSlash,
+            DateFormat::MonthDayYear,
+            DateFormat::Iso,
+        ] {
+            assert_eq!(DateFormat::parse_or_default(shape.render()), shape);
+        }
     }
 
     #[test]

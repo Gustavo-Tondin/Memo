@@ -30,6 +30,7 @@ const { default: NoteEditor } = await import("./NoteEditor.svelte");
 const { default: HomeView } = await import("./HomeView.svelte");
 const { default: PageHeader } = await import("./PageHeader.svelte");
 const { default: TabBar } = await import("./TabBar.svelte");
+const { default: SettingsView } = await import("./SettingsView.svelte");
 
 const task = (id, text, extra = {}) => ({
   id,
@@ -725,6 +726,9 @@ describe("App", () => {
       completedName: "Completed",
       notesFolder: "Notes",
       notesInbox: "Inbox",
+      dateDisplayFormat: "dd-mm-yyyy",
+      closeInspectorOnClickAway: false,
+      quickNoteFolder: "Inbox",
     },
   };
 
@@ -929,6 +933,9 @@ describe("App with a user workspace", () => {
       completedName: "Completed",
       notesFolder: "Notes",
       notesInbox: "Inbox",
+      dateDisplayFormat: "dd-mm-yyyy",
+      closeInspectorOnClickAway: false,
+      quickNoteFolder: "Inbox",
     },
   };
 
@@ -1409,6 +1416,9 @@ describe("App shell with tabs", () => {
       completedName: "Completed",
       notesFolder: "Notes",
       notesInbox: "Inbox",
+      dateDisplayFormat: "dd-mm-yyyy",
+      closeInspectorOnClickAway: false,
+      quickNoteFolder: "Inbox",
     },
   };
 
@@ -1664,5 +1674,138 @@ describe("TabBar", () => {
     await fireEvent.drop(els[1]);
 
     expect(moves).toEqual([]);
+  });
+});
+
+describe("SettingsView", () => {
+  const settings = {
+    dailyMode: "reset",
+    dailyAt: "00:00",
+    weeklyMode: "reset",
+    weeklyAt: "00:00",
+    weekStartsOn: "monday",
+    restoreLastScreen: false,
+    showListCounts: true,
+    autoUrgentByDate: true,
+    dateDisplayFormat: "dd-mm-yyyy",
+    closeInspectorOnClickAway: false,
+    quickNoteFolder: "Inbox",
+  };
+
+  const notebook = { path: "/n", name: "n", readOnly: false };
+
+  const props = (extra = {}) => ({
+    notebook,
+    folders: ["Inbox", "Clientes"],
+    notesInbox: "Inbox",
+    onChanged: noop,
+    onError: noop,
+    ...extra,
+  });
+
+  test("shows every documented key with its stored value", async () => {
+    bridge({ notebook_settings: settings });
+    render(SettingsView, { props: props() });
+
+    expect(await screen.findByLabelText("Date format")).toBeTruthy();
+    expect(screen.getByLabelText("Show task counts in the sidebar").checked).toBe(true);
+    expect(screen.getByLabelText("Reopen on the last screen").checked).toBe(false);
+    expect(
+      screen.getByLabelText("Close the task panel when clicking outside").checked,
+    ).toBe(false);
+    expect(screen.getByLabelText("Week starts on").value).toBe("monday");
+  });
+
+  test("changing one setting sends only that key", async () => {
+    // The core keeps what it is not told about, so a screen never has to
+    // hold — or risk overwriting — the rest of the config.
+    bridge({ notebook_settings: settings, set_notebook_settings: null });
+    render(SettingsView, { props: props() });
+
+    await userEvent.click(
+      await screen.findByLabelText("Show task counts in the sidebar"),
+    );
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("set_notebook_settings", {
+        settings: { showListCounts: false },
+      }),
+    );
+  });
+
+  test("the screen shows what was stored, not what it sent", async () => {
+    // The core normalises: a value it cannot use falls back, and the screen
+    // must show the fallback rather than the rejected input.
+    let stored = { ...settings };
+    bridge({
+      notebook_settings: () => stored,
+      set_notebook_settings: () => {
+        stored = { ...stored, dateDisplayFormat: "dd-mm-yyyy" };
+        return null;
+      },
+    });
+    render(SettingsView, { props: props() });
+
+    const field = await screen.findByLabelText("Date format");
+    await userEvent.selectOptions(field, "yyyy-mm-dd");
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Date format").value).toBe("dd-mm-yyyy"),
+    );
+  });
+
+  test("a read-only notebook says so and edits nothing", async () => {
+    bridge({ notebook_settings: settings });
+    render(SettingsView, { props: props({ notebook: { ...notebook, readOnly: true } }) });
+
+    expect(await screen.findByText(/newer version of Memo/)).toBeTruthy();
+    expect(screen.getByLabelText("Date format").disabled).toBe(true);
+    expect(screen.getByLabelText("Week starts on").disabled).toBe(true);
+  });
+
+  test("the quick note destination offers the notes folders", async () => {
+    bridge({ notebook_settings: settings });
+    render(SettingsView, { props: props() });
+
+    const field = await screen.findByLabelText("Quick note goes to");
+    const options = [...field.options].map((o) => o.value);
+    expect(options).toEqual(["Inbox", "Clientes"]);
+  });
+});
+
+describe("date display", () => {
+  test("a task's date follows the notebook's format", async () => {
+    // The file always stores ISO; only the drawing changes.
+    bridge({ list_tasks: [task("a1", "Pagar", { due: "2026-07-05" })] });
+
+    render(ListView, {
+      props: {
+        list: "Tasks/Inbox.md",
+        readOnly: false,
+        onChanged: noop,
+        onError: noop,
+        reloadKey: 0,
+        dateFormat: "yyyy-mm-dd",
+      },
+    });
+
+    expect(await screen.findByText("2026-07-05")).toBeTruthy();
+    expect(screen.queryByText("05-07-2026")).toBeNull();
+  });
+
+  test("the default shape is the documented one", async () => {
+    bridge({ list_tasks: [task("a1", "Pagar", { due: "2026-07-05" })] });
+
+    render(ListView, {
+      props: {
+        list: "Tasks/Inbox.md",
+        readOnly: false,
+        onChanged: noop,
+        onError: noop,
+        reloadKey: 0,
+      },
+    });
+
+    expect(await screen.findByText("05-07-2026")).toBeTruthy();
   });
 });

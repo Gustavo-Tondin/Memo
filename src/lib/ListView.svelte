@@ -14,6 +14,7 @@
     reloadKey,
     onSelect,
     selectedId = null,
+    dateFormat = "dd-mm-yyyy",
   } = $props();
 
   let tasks = $state([]);
@@ -85,6 +86,7 @@
         selected={!!task.id && task.id === selectedId}
         onComplete={complete}
         onEdit={edit}
+        {dateFormat}
       >
         <button onclick={() => pull("day", task)}>{S.pullToToday}</button>
         <button onclick={() => pull("week", task)}>{S.pullToWeek}</button>

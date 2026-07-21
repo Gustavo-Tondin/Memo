@@ -13,6 +13,7 @@
   let {
     notesFolder,
     notesInbox = "Inbox",
+    quickNoteFolder = null,
     folders = [],
     readOnly = false,
     onChanged,
@@ -21,16 +22,17 @@
     onSelectTask,
     selectedId = null,
     reloadKey = 0,
+    dateFormat = "dd-mm-yyyy",
   } = $props();
 
   let tasks = $state([]);
   let notes = $state([]);
   let capture = $state("");
-  /// Null until the user picks: the destination defaults to the inbox but
-  /// must follow the prop if it arrives later, so a state seeded from it
-  /// would freeze on whatever the prop was at first render.
+  /// Null until the user picks it here: the destination comes from the
+  /// notebook's `quickNoteFolder`, and a state seeded from the prop would
+  /// freeze on whatever it was at first render.
   let chosenFolder = $state(null);
-  let captureTo = $derived(chosenFolder ?? notesInbox);
+  let captureTo = $derived(chosenFolder ?? quickNoteFolder ?? notesInbox);
 
   $effect(() => {
     reloadKey;
@@ -93,6 +95,7 @@
           selected={!!entry.task.id && entry.task.id === selectedId}
           onComplete={complete}
           onEdit={edit}
+          {dateFormat}
         />
       {/each}
     </ul>

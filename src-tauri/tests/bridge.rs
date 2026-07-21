@@ -977,3 +977,55 @@ fn a_deleted_note_is_recoverable_from_the_trash() {
         .unwrap()
         .contains("vale a pena guardar"));
 }
+
+#[test]
+fn the_phase_nine_settings_round_trip_and_reach_the_layout() {
+    let (_lock, app, dir) = app_with_notebook();
+
+    let defaults = ok(&app, "notebook_settings", json!({}));
+    assert_eq!(defaults["dateDisplayFormat"], "dd-mm-yyyy");
+    assert_eq!(defaults["closeInspectorOnClickAway"], json!(false));
+    assert_eq!(defaults["quickNoteFolder"], "Inbox");
+
+    ok(
+        &app,
+        "set_notebook_settings",
+        json!({ "settings": {
+            "dateDisplayFormat": "yyyy-mm-dd",
+            "closeInspectorOnClickAway": true,
+            "quickNoteFolder": "Clientes"
+        }}),
+    );
+
+    let saved = ok(&app, "notebook_settings", json!({}));
+    assert_eq!(saved["dateDisplayFormat"], "yyyy-mm-dd");
+    assert_eq!(saved["closeInspectorOnClickAway"], json!(true));
+    assert_eq!(saved["quickNoteFolder"], "Clientes");
+
+    // The screens read these off the snapshot, not by asking separately.
+    let snap = ok(&app, "notebook_snapshot", json!({}));
+    assert_eq!(snap["info"]["layout"]["dateDisplayFormat"], "yyyy-mm-dd");
+    assert_eq!(snap["info"]["layout"]["closeInspectorOnClickAway"], json!(true));
+    assert_eq!(snap["info"]["layout"]["quickNoteFolder"], "Clientes");
+
+    // And it really reached the file.
+    let on_disk = std::fs::read_to_string(dir.path().join(".memo/config.json")).unwrap();
+    assert!(on_disk.contains("yyyy-mm-dd"), "{on_disk}");
+}
+
+#[test]
+fn a_nonsense_display_setting_is_normalized_instead_of_stored_wrong() {
+    // A date shown wrong is worse than a date shown plainly, so the core
+    // falls back rather than keeping a pattern it cannot render.
+    let (_lock, app, _dir) = app_with_notebook();
+
+    ok(
+        &app,
+        "set_notebook_settings",
+        json!({ "settings": { "dateDisplayFormat": "banana", "quickNoteFolder": "   " } }),
+    );
+
+    let saved = ok(&app, "notebook_settings", json!({}));
+    assert_eq!(saved["dateDisplayFormat"], "dd-mm-yyyy");
+    assert_eq!(saved["quickNoteFolder"], "Inbox", "an empty folder is no folder");
+}

@@ -43,6 +43,38 @@ export const S = {
     "This widget's folder points outside the workspace, so it was not loaded.",
   widgetNoLists: "No lists in this widget yet.",
 
+  // Settings (phase 9)
+  settings: "Settings",
+  settingsSaved: "Saved.",
+  sectionDay: "Day and week",
+  sectionDisplay: "Display",
+  sectionNotebook: "Notebook",
+  rolloverDaily: "When the day turns",
+  rolloverWeekly: "When the week turns",
+  rolloverMode: "Unfinished tasks",
+  rolloverModeReset: "go back to suggestions",
+  rolloverModeCarry: "stay pulled",
+  rolloverAt: "Turn at",
+  rolloverAtHint: "Offset from midnight. -02:00 means 22:00 the evening before.",
+  weekStartsOn: "Week starts on",
+  monday: "Monday",
+  sunday: "Sunday",
+  dateFormat: "Date format",
+  restoreLastScreen: "Reopen on the last screen",
+  restoreLastScreenHint:
+    "Off by default: landing on Today is more predictable.",
+  showListCounts: "Show task counts in the sidebar",
+  autoUrgentByDate: "Treat overdue tasks as urgent",
+  autoUrgentByDateHint:
+    "The #urgent tag written by hand always counts, either way.",
+  closeOnClickAway: "Close the task panel when clicking outside",
+  closeOnClickAwayHint:
+    "Off by default: it fires easily, and losing a half-typed task costs more than the shortcut is worth.",
+  quickNoteFolder: "Quick note goes to",
+  notebookPath: "Folder",
+  readOnlyNotice:
+    "This notebook was written by a newer version of Memo and is open for reading only.",
+
   // Shell (phase 8.5)
   home: "Home",
   tasks: "Tasks",

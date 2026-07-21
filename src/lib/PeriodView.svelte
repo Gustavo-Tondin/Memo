@@ -17,6 +17,7 @@
     reloadKey,
     onSelect,
     selectedId = null,
+    dateFormat = "dd-mm-yyyy",
   } = $props();
 
   let pulled = $state([]);
@@ -116,6 +117,7 @@
         selected={!!entry.task.id && entry.task.id === selectedId}
         onComplete={complete}
         onEdit={edit}
+        {dateFormat}
       >
         <button onclick={() => remove(entry.path, entry.task.id)}>{S.removeFromPeriod}</button>
       </TaskRow>

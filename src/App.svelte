@@ -17,6 +17,7 @@
   import NotesWidget from "./lib/NotesWidget.svelte";
   import NoteEditor from "./lib/NoteEditor.svelte";
   import HomeView from "./lib/HomeView.svelte";
+  import SettingsView from "./lib/SettingsView.svelte";
   import TabBar from "./lib/TabBar.svelte";
   import PageHeader from "./lib/PageHeader.svelte";
   import { listName } from "./lib/paths.js";
@@ -89,7 +90,13 @@
   function restoreView(id) {
     if (!id) return null;
     if (id === "day" || id === "week") return { kind: "period", period: id };
-    if (id === "home" || id === "completed" || id === "notes" || id === "tasks")
+    if (
+      id === "home" ||
+      id === "completed" ||
+      id === "notes" ||
+      id === "tasks" ||
+      id === "settings"
+    )
       return { kind: id };
     if (id.startsWith("list:")) return { kind: "list", list: id.slice(5) };
     if (id.startsWith("ws:")) return { kind: "workspace", ws: id.slice(3) };
@@ -108,6 +115,9 @@
       completedName: "Completed",
       notesFolder: "Notes",
       notesInbox: "Inbox",
+      dateDisplayFormat: "dd-mm-yyyy",
+      closeInspectorOnClickAway: false,
+      quickNoteFolder: "Inbox",
     },
   );
 
@@ -137,6 +147,8 @@
         return S.tasks;
       case "notes":
         return S.notes;
+      case "settings":
+        return S.settings;
       case "completed":
         return S.completed;
       case "list":
@@ -451,11 +463,20 @@
           {/if}
         </div>
 
-        <div class="nav-bottom" title={notebook.path}>
-          <button class="secondary" onclick={chooseFolder}>
+        <div class="nav-bottom">
+          <button
+            class="secondary"
+            title={notebook.path}
+            onclick={chooseFolder}
+          >
             {notebook.name}
             {#if notebook.readOnly}<span class="ro">{S.readOnly}</span>{/if}
           </button>
+          <button
+            class="secondary"
+            class:active={isOpen({ kind: "settings" })}
+            onclick={() => openTab({ kind: "settings" })}>{S.settings}</button
+          >
         </div>
       </nav>
 
@@ -483,7 +504,9 @@
           menu={pageMenu}
         />
 
-        <div class="content">
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <div class="content" onclick={clickedAway}>
           {#if error}
             <p class="error">
               {error}
@@ -510,6 +533,8 @@
 
           {#if view.kind === "home"}
             <HomeView
+              dateFormat={layout.dateDisplayFormat}
+              quickNoteFolder={layout.quickNoteFolder}
               notesFolder={layout.notesFolder}
               notesInbox={layout.notesInbox}
               folders={noteFolders}
@@ -523,6 +548,7 @@
             />
           {:else if view.kind === "tasks"}
             <TasksView
+              dateFormat={layout.dateDisplayFormat}
               inbox={layout.inbox}
               {clock}
               readOnly={notebook.readOnly}
@@ -534,6 +560,7 @@
             />
           {:else if view.kind === "list"}
             <ListView
+              dateFormat={layout.dateDisplayFormat}
               list={view.list}
               readOnly={notebook.readOnly}
               onChanged={refreshNotebook}
@@ -561,6 +588,14 @@
               onSaved={refreshNotebook}
               onError={fail}
               onLoaded={(state) => (openNote = state)}
+            />
+          {:else if view.kind === "settings"}
+            <SettingsView
+              {notebook}
+              folders={noteFolders}
+              notesInbox={layout.notesInbox}
+              onChanged={refreshNotebook}
+              onError={fail}
             />
           {:else if view.kind === "workspace"}
             {@const current = userWorkspaces.find((w) => w.folderName === view.ws)}

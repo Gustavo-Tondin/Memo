@@ -40,6 +40,12 @@ pub struct NotebookLayout {
     /// The fixed Notes widget's folder, and the folder loose notes land in.
     pub notes_folder: String,
     pub notes_inbox: String,
+    /// Preferences the screens need on every render, so they do not each ask
+    /// for the settings separately: how to draw a date, whether clicking away
+    /// closes the task panel, and where the quick capture writes.
+    pub date_display_format: String,
+    pub close_inspector_on_click_away: bool,
+    pub quick_note_folder: String,
 }
 
 /// What the frontend needs to know about the open notebook.
@@ -74,6 +80,15 @@ impl NotebookInfo {
                 completed_name: memo_core::COMPLETED_LIST.to_string(),
                 notes_folder: memo_core::NOTES_DIR.to_string(),
                 notes_inbox: memo_core::notefolder::NOTES_INBOX.to_string(),
+                date_display_format: notebook
+                    .config()
+                    .date_display_format
+                    .render()
+                    .to_string(),
+                close_inspector_on_click_away: notebook
+                    .config()
+                    .close_inspector_on_click_away,
+                quick_note_folder: notebook.config().quick_note_folder.clone(),
             },
         })
     }
@@ -100,6 +115,9 @@ pub struct NotebookSettings {
     pub restore_last_screen: Option<bool>,
     pub show_list_counts: Option<bool>,
     pub auto_urgent_by_date: Option<bool>,
+    pub date_display_format: Option<String>,
+    pub close_inspector_on_click_away: Option<bool>,
+    pub quick_note_folder: Option<String>,
 }
 
 #[tauri::command]
@@ -231,6 +249,9 @@ pub fn notebook_settings(state: State<'_, AppState>) -> CommandResult<NotebookSe
             restore_last_screen: Some(config.restore_last_screen),
             show_list_counts: Some(config.show_list_counts),
             auto_urgent_by_date: Some(config.auto_urgent_by_date),
+            date_display_format: Some(config.date_display_format.render().to_string()),
+            close_inspector_on_click_away: Some(config.close_inspector_on_click_away),
+            quick_note_folder: Some(config.quick_note_folder.clone()),
         })
     })
 }
@@ -272,6 +293,17 @@ pub fn set_notebook_settings(
         }
         if let Some(v) = settings.auto_urgent_by_date {
             config.auto_urgent_by_date = v;
+        }
+        if let Some(v) = &settings.date_display_format {
+            config.date_display_format = memo_core::config::DateFormat::parse_or_default(v);
+        }
+        if let Some(v) = settings.close_inspector_on_click_away {
+            config.close_inspector_on_click_away = v;
+        }
+        if let Some(v) = &settings.quick_note_folder {
+            if !v.trim().is_empty() {
+                config.quick_note_folder = v.clone();
+            }
         }
 
         nb.set_config(config)?;

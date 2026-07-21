@@ -14,6 +14,10 @@ export const api = {
   pickFolder: () => invoke("pick_notebook_folder"),
   openNotebook: (path) => invoke("open_notebook", { path }),
   currentNotebook: () => invoke("current_notebook"),
+  // Every field is optional: the core keeps what it is not told about, so a
+  // screen can send one key without holding the rest.
+  notebookSettings: () => invoke("notebook_settings"),
+  setNotebookSettings: (settings) => invoke("set_notebook_settings", { settings }),
   screenToRestore: () => invoke("screen_to_restore"),
   rememberScreen: (screen) => invoke("remember_screen", { screen }),
 
