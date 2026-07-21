@@ -56,6 +56,12 @@ pub enum Error {
     #[error("{0} is created by the app and cannot be renamed or deleted")]
     Protected(String),
 
+    /// The file could not be sent to the trash. Deliberately not falling
+    /// back to a permanent delete: destroying the file is the one outcome
+    /// the trash exists to prevent.
+    #[error("could not move {path} to the trash: {message}")]
+    Trash { path: PathBuf, message: String },
+
     /// The file watcher could not be started or kept running.
     #[error("could not watch the notebook: {0}")]
     Watch(String),

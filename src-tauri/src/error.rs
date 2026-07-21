@@ -46,6 +46,7 @@ impl From<memo_core::Error> for CommandError {
             Error::InvalidNotePath(_) => "invalidNotePath",
             Error::ReadOnlyNotebook { .. } => "readOnlyNotebook",
             Error::Protected(_) => "protected",
+            Error::Trash { .. } => "trash",
             Error::Watch(_) => "watch",
         };
         Self::new(kind, error.to_string())

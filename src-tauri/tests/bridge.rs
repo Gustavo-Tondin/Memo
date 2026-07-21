@@ -99,6 +99,8 @@ fn exclusive() -> std::sync::MutexGuard<'static, ()> {
 
     let dir = DIR.get_or_init(|| tempfile::tempdir().unwrap());
     std::env::set_var("MEMO_CONFIG_DIR", dir.path());
+    // Deletions go to a temporary folder, never the user's real trash.
+    std::env::set_var("MEMO_TRASH_DIR", dir.path().join("trash"));
     let _ = std::fs::remove_file(dir.path().join("machine-prefs.json"));
 
     guard
@@ -946,4 +948,32 @@ fn a_note_address_that_escapes_is_refused_by_the_bridge() {
     // And a widget that is not a notes widget cannot be addressed as one.
     let err = invoke(&app, "list_notes", json!({ "folder": "Tasks" })).unwrap_err();
     assert_eq!(err["kind"], "invalidNotePath");
+}
+
+#[test]
+fn a_deleted_note_is_recoverable_from_the_trash() {
+    // Deleting through the app must never destroy the file: the user can
+    // change their mind, and the notebook is a plain folder they own.
+    let (_lock, app, dir) = app_with_notebook();
+    let path = ok(
+        &app,
+        "create_note",
+        json!({ "folder": "Notes", "inFolder": "Inbox", "title": "some" }),
+    );
+    let path = path.as_str().unwrap().to_string();
+    ok(
+        &app,
+        "write_note",
+        json!({ "folder": "Notes", "path": path, "body": "vale a pena guardar\n" }),
+    );
+
+    ok(&app, "delete_note", json!({ "folder": "Notes", "path": path }));
+
+    assert!(!dir.path().join("Notes/Inbox/some.md").exists(), "gone from the notebook");
+    let trashed = std::path::PathBuf::from(std::env::var("MEMO_TRASH_DIR").unwrap())
+        .join("some.md");
+    assert!(trashed.is_file(), "and still on disk, recoverable by hand");
+    assert!(std::fs::read_to_string(&trashed)
+        .unwrap()
+        .contains("vale a pena guardar"));
 }

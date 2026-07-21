@@ -11,11 +11,23 @@ fn today() -> NaiveDate {
 }
 
 fn folder() -> (tempfile::TempDir, NoteFolder) {
+    temp_trash();
     let dir = tempfile::tempdir().unwrap();
     Notebook::init(dir.path()).unwrap();
     let notes = NoteFolder::new(dir.path().join("Notes"));
     notes.ensure_default_folders().unwrap();
     (dir, notes)
+}
+
+
+/// The folder this binary's deletions go to, instead of the user's real
+/// trash. Every test sets the same path, so the shared environment variable
+/// is always written with the same value and cannot race.
+fn temp_trash() -> &'static std::path::Path {
+    static TRASH: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    let dir = TRASH.get_or_init(|| tempfile::tempdir().unwrap());
+    std::env::set_var("MEMO_TRASH_DIR", dir.path());
+    dir.path()
 }
 
 fn read(path: impl AsRef<std::path::Path>) -> String {
@@ -352,4 +364,33 @@ fn quick_capture_names_the_note_after_what_was_written() {
     // And text with nothing nameable still becomes a note.
     let blank = notes.quick_capture("Inbox", "   \n\n", today()).unwrap();
     assert_eq!(blank, "Inbox/Untitled.md");
+}
+
+#[test]
+fn a_deleted_note_goes_to_the_trash_and_can_be_recovered() {
+    // Deleting is a filing decision, not a decision to burn the file — the
+    // user can change their mind, and the app is not the only thing that
+    // knows what was in there. Same reasoning as a deleted list rescuing
+    // its tasks (principle 2).
+    let bin = temp_trash();
+    let (dir, notes) = folder();
+
+    let path = notes.create("Inbox", "arrependimento", today()).unwrap();
+    notes.write(&path, "Conteúdo que importa.\n", today()).unwrap();
+    notes.delete(&path).unwrap();
+
+    assert!(notes.notes().unwrap().is_empty(), "gone from the notebook");
+    assert!(!dir.path().join("Notes/Inbox/arrependimento.md").exists());
+
+    // ...and still on disk, recoverable by hand.
+    let rescued = bin.join("arrependimento.md");
+    assert!(rescued.is_file(), "the file must survive the delete");
+    assert!(read(&rescued).contains("Conteúdo que importa"));
+
+    // Deleting a second note of the same name does not overwrite the first.
+    let again = notes.create("Inbox", "arrependimento", today()).unwrap();
+    notes.write(&again, "A segunda.\n", today()).unwrap();
+    notes.delete(&again).unwrap();
+    assert!(bin.join("arrependimento 2.md").is_file());
+    assert!(read(&rescued).contains("Conteúdo que importa"), "the first is intact");
 }

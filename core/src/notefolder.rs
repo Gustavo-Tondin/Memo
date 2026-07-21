@@ -218,9 +218,9 @@ impl NoteFolder {
         Ok(relative)
     }
 
+    /// Sends a note to the trash — recoverable, never destroyed.
     pub fn delete(&self, relative: &str) -> Result<()> {
-        let path = self.note_path(relative)?;
-        std::fs::remove_file(&path).ctx(&path)
+        crate::fsio::move_to_trash(self.note_path(relative)?)
     }
 
     /// Renames a note inside its folder, returning the new address.

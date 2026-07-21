@@ -612,8 +612,12 @@ impl Notebook {
 
         // Inbox first, then the file goes away: a crash in between leaves a
         // duplicate, never a hole.
+        //
+        // To the trash rather than gone: the rescue above only carries the
+        // *tasks*, and a list file may also hold a heading, a note to self,
+        // whatever prose the user wrote around them. That is theirs too.
         inbox.save()?;
-        std::fs::remove_file(&file).ctx(&file)?;
+        crate::fsio::move_to_trash(&file)?;
         let rescued = rescued.len();
 
         let (dir, _) = split_list_path(path)?;

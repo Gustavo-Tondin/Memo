@@ -6,6 +6,17 @@
 
 use std::path::Path;
 
+/// The folder this binary's deletions go to, instead of the user's real
+/// trash. Every test sets the same path, so the shared environment variable
+/// is always written with the same value and cannot race.
+fn temp_trash() -> &'static std::path::Path {
+    static TRASH: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    let dir = TRASH.get_or_init(|| tempfile::tempdir().unwrap());
+    std::env::set_var("MEMO_TRASH_DIR", dir.path());
+    dir.path()
+}
+
+
 use memo_core::config::{Config, RolloverMode};
 use memo_core::state::Period;
 use memo_core::{Error, Notebook, TaskList};
@@ -302,6 +313,7 @@ fn renaming_a_list_repoints_completed_origins_and_states() {
 
 #[test]
 fn default_lists_cannot_be_renamed_or_deleted() {
+    temp_trash();
     let dir = tempfile::tempdir().unwrap();
     let notebook = Notebook::init(dir.path()).unwrap();
 
@@ -332,6 +344,7 @@ fn renaming_onto_an_existing_list_is_refused() {
 
 #[test]
 fn deleting_a_list_rescues_its_tasks_into_the_inbox() {
+    temp_trash();
     let dir = tempfile::tempdir().unwrap();
     let notebook = Notebook::init(dir.path()).unwrap();
     notebook.create_list("Tasks", "Compras").unwrap();
@@ -358,6 +371,7 @@ fn deleting_a_list_rescues_its_tasks_into_the_inbox() {
 
 #[test]
 fn deleting_a_list_rescues_tasks_that_never_earned_an_id() {
+    temp_trash();
     // Caught while making ids lazy: the rescue used to iterate over ids, so
     // every task without one — which is now most of them — was deleted with
     // the file.
@@ -381,6 +395,7 @@ fn deleting_a_list_rescues_tasks_that_never_earned_an_id() {
 
 #[test]
 fn path_traversal_is_still_refused_by_the_new_operations() {
+    temp_trash();
     let dir = tempfile::tempdir().unwrap();
     let notebook = Notebook::init(dir.path()).unwrap();
 
@@ -892,6 +907,7 @@ fn the_conflicting_copy_is_left_untouched() {
 
 #[test]
 fn a_notebook_from_a_newer_app_refuses_every_write() {
+    temp_trash();
     let dir = tempfile::tempdir().unwrap();
     let (notebook, id) = notebook_with_task(dir.path(), "Comprar leite");
     drop(notebook);
@@ -923,6 +939,7 @@ fn a_notebook_from_a_newer_app_refuses_every_write() {
 
 #[test]
 fn the_whole_phase_two_scenario_end_to_end() {
+    temp_trash();
     // Roadmap's exit criterion: create → pull into the week → pull into the
     // day → complete → undo, checked against the files.
     let dir = tempfile::tempdir().unwrap();
@@ -1008,4 +1025,31 @@ fn a_quote_in_a_list_name_is_refused() {
         notebook.create_list("Tasks", "Mi\"casa"),
         Err(memo_core::Error::InvalidListName(_))
     ));
+}
+
+#[test]
+fn a_deleted_list_keeps_the_prose_the_rescue_cannot_carry() {
+    // The rescue moves the *tasks* to the Inbox — but a list file also holds
+    // whatever the user wrote around them: a heading, a note to self. That
+    // is theirs too, so the file goes to the trash rather than being erased.
+    let bin = temp_trash();
+    let dir = tempfile::tempdir().unwrap();
+    let notebook = memo_core::Notebook::init(dir.path()).unwrap();
+    notebook.create_list("Tasks", "Obra").unwrap();
+    std::fs::write(
+        dir.path().join("Tasks/Obra.md"),
+        "# Obra da casa\n\nFalar com o Jorge antes de comprar.\n\n- [ ] Cimento\n",
+    )
+    .unwrap();
+
+    let rescued = notebook.delete_list("Tasks/Obra.md").unwrap();
+    assert_eq!(rescued, 1, "the task moved to the Inbox");
+    assert!(std::fs::read_to_string(dir.path().join("Tasks/Inbox.md"))
+        .unwrap()
+        .contains("Cimento"));
+
+    // And the prose the rescue could not carry is still recoverable.
+    let trashed = std::fs::read_to_string(bin.join("Obra.md")).unwrap();
+    assert!(trashed.contains("# Obra da casa"));
+    assert!(trashed.contains("Falar com o Jorge"));
 }
