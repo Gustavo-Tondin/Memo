@@ -124,6 +124,31 @@ describe("ListView", () => {
     );
   });
 
+  test("completing a task with no id gives it one first", async () => {
+    // How this showed up: completing a repeating task writes the next
+    // occurrence as a *fresh* line, with no id — it has never been referenced.
+    // Ticking that one sent id: null over the bridge and the command refused
+    // it ("invalid type: null, expected a string").
+    bridge({
+      list_tasks: [task(null, "Regar plantas", { repeat: { every: 1, unit: "day" } })],
+      ensure_task_id: "new1",
+      complete_task: {},
+    });
+
+    render(ListView, {
+      props: { list: "Compras", readOnly: false, onChanged: noop, onError: noop, reloadKey: 0 },
+    });
+
+    await userEvent.click(await screen.findByLabelText("concluir"));
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("complete_task", {
+        list: "Compras",
+        id: "new1",
+      }),
+    );
+  });
+
   test("pulling a task with no id gives it one first", async () => {
     // Written by hand in another editor: there is nothing to reference in the
     // day state until the core hands out an id.
@@ -262,6 +287,27 @@ describe("PeriodView", () => {
       expect(invoke).toHaveBeenCalledWith("add_task_in_period", {
         period: "day",
         text: "Responder e-mail",
+      }),
+    );
+  });
+
+  test("completing an id-less task from the day screen also works", async () => {
+    // Same bug as in ListView: a respawned repetition can be sitting in Today.
+    bridge({
+      period_tasks: [{ list: "Compras", task: task(null, "Regar plantas") }],
+      grouped_suggestions: [],
+      ensure_task_id: "new1",
+      list_tasks: [task(null, "Regar plantas")],
+      complete_task: {},
+    });
+
+    render(PeriodView, { props });
+    await userEvent.click(await screen.findByLabelText("concluir"));
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("complete_task", {
+        list: "Compras",
+        id: "new1",
       }),
     );
   });

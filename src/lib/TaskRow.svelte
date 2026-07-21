@@ -41,6 +41,17 @@
     (task.subtasks ?? []).filter((s) => s.done).length,
   );
 
+  let hasFields = $derived(
+    !!(
+      task.due ||
+      task.repeat ||
+      task.priority ||
+      task.subtasks?.length ||
+      task.tags?.length ||
+      showList
+    ),
+  );
+
   // The file always stores ISO; display follows the user's preference, which
   // arrives already resolved from the shell. Default until settings exist.
   function formatDate(iso) {
@@ -53,7 +64,7 @@
   <input
     type="checkbox"
     checked={task.done}
-    onchange={() => onComplete(list, task.id)}
+    onchange={() => onComplete(list, task)}
     aria-label={task.done ? "desmarcar" : "concluir"}
   />
 
@@ -77,19 +88,25 @@
     </button>
   {/if}
 
-  <!-- In list view the fields stay quiet: a compact marker, and the detail
-       only when the task is opened. Phase 9 gives this a real design. -->
-  {#if task.priority}<span class="prio">!{task.priority}</span>{/if}
-  {#if task.due}<span class="due">{formatDate(task.due)}</span>{/if}
-  {#each task.tags ?? [] as tag}<span class="tag">#{tag}</span>{/each}
-  {#if task.subtasks?.length}
-    <span class="sub">{doneSubtasks}/{task.subtasks.length}</span>
-  {/if}
-  {#if task.repeat}<span class="repeat" title="repete">↻</span>{/if}
-
-  {#if showList}<small class="list">{list}</small>{/if}
   {@render children?.()}
 </li>
+
+<!-- The fields belong under the task, not beside it. Sharing the line with
+     the name made them compete with it for attention, when the name is the
+     only thing being read most of the time. Phase 10 gives this a real look;
+     the order here is already the one it should keep. -->
+{#if hasFields}
+  <li class="fields">
+    {#if task.due}<span class="due">{formatDate(task.due)}</span>{/if}
+    {#if task.repeat}<span class="repeat" title="repete">↻</span>{/if}
+    {#if task.priority}<span class="prio">!{task.priority}</span>{/if}
+    {#if task.subtasks?.length}
+      <span class="sub">{doneSubtasks}/{task.subtasks.length}</span>
+    {/if}
+    {#each task.tags ?? [] as tag}<span class="tag">#{tag}</span>{/each}
+    {#if showList}<span class="list">{list}</span>{/if}
+  </li>
+{/if}
 
 {#if task.description?.length}
   <li class="description">{task.description.join(" ")}</li>
@@ -115,35 +132,29 @@
     cursor: pointer;
     flex: 1;
   }
-  .list {
-    color: #666;
-  }
   .edit {
     flex: 1;
     font: inherit;
   }
-  .prio,
-  .due,
-  .tag,
-  .sub,
-  .repeat {
-    font-size: 0.75rem;
-    padding: 0.05rem 0.35rem;
-    border-radius: 10px;
-    background: #eee;
-    color: #444;
+  /* Quiet by default: same size, same colour, no chips. A field is a note
+     about the task, not a competing headline. */
+  .fields {
+    gap: 0.6rem;
+    padding: 0 0 0.2rem 1.9rem;
+    font-size: 0.78rem;
+    color: #777;
+  }
+  .fields span {
     white-space: nowrap;
   }
   .prio {
-    background: #ffe0e0;
     color: #a00;
   }
   .tag {
-    background: #e3ecff;
     color: #24468a;
   }
   .description {
-    padding: 0 0 0.35rem 2rem;
+    padding: 0 0 0.35rem 1.9rem;
     font-size: 0.85rem;
     color: #666;
   }

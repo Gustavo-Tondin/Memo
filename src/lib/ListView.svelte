@@ -49,26 +49,24 @@
     act(() => api.createTask(list, text));
   };
 
-  const complete = (l, id) => act(() => api.completeTask(l, id));
-  const edit = (l, id, text) => act(() => api.editTaskText(l, id, text));
+  // A task can have no id yet — written by hand in another editor, or just
+  // respawned by a repetition — and both of these are what earns one.
+  const complete = (l, task) =>
+    act(async () => {
+      const id = await ensureTaskId(l, task);
+      await api.completeTask(l, id);
+    });
 
-  // A task written by hand in another editor has no id yet, and pulling it
-  // into a period is exactly the kind of thing that earns one.
   const pull = (period, task) =>
     act(async () => {
       const id = await ensureTaskId(list, task);
       await api.pullInto(period, list, id);
     });
+
+  const edit = (l, id, text) => act(() => api.editTaskText(l, id, text));
 </script>
 
 <h2>{list}</h2>
-
-{#if !readOnly}
-  <form onsubmit={(e) => (e.preventDefault(), add())}>
-    <input placeholder="Nova tarefa…" bind:value={newText} />
-    <button type="submit">Adicionar</button>
-  </form>
-{/if}
 
 {#if tasks.length === 0}
   <p class="empty">Nenhuma tarefa nesta lista.</p>
@@ -93,6 +91,15 @@
   </ul>
 {/if}
 
+<!-- Below the list, not above it: adding is what you do after reading what is
+     already there, and a field on top pushes the list down every render. -->
+{#if !readOnly}
+  <form onsubmit={(e) => (e.preventDefault(), add())}>
+    <input placeholder="Nova tarefa…" bind:value={newText} />
+    <button type="submit">Adicionar</button>
+  </form>
+{/if}
+
 <style>
   ul {
     list-style: none;
@@ -104,7 +111,7 @@
   form {
     display: flex;
     gap: 0.5rem;
-    margin-bottom: 0.5rem;
+    margin-top: 1rem;
   }
   form input {
     flex: 1;

@@ -55,7 +55,12 @@
     act(() => api.addTaskInPeriod(period, text));
   };
 
-  const complete = (list, id) => act(() => api.completeTask(list, id));
+  const complete = (list, task) =>
+    act(async () => {
+      const id = await ensureTaskId(list, task);
+      await api.completeTask(list, id);
+    });
+
   const edit = (list, id, text) => act(() => api.editTaskText(list, id, text));
   const remove = (list, id) => act(() => api.removeFrom(period, list, id));
 
