@@ -139,6 +139,20 @@ pub fn this_week(offset: TurnOffset, starts_on: WeekStart) -> NaiveDate {
     logical_week_start_at(Local::now(), offset, starts_on)
 }
 
+/// When the next daily turn happens, from the system clock.
+///
+/// The `_at` variants take the instant for the tests; these two exist so no
+/// caller outside this module ever needs `Local::now()` — which is the whole
+/// invariant (see `core/tests/invariants.rs`).
+pub fn next_daily_turn(offset: TurnOffset) -> DateTime<Local> {
+    next_daily_turn_at(Local::now(), offset)
+}
+
+/// When the next weekly turn happens, from the system clock.
+pub fn next_weekly_turn(offset: TurnOffset, starts_on: WeekStart) -> DateTime<Local> {
+    next_weekly_turn_at(Local::now(), offset, starts_on)
+}
+
 /// When the next daily turn happens, so a running app can schedule a timer
 /// instead of only rolling over when the notebook is opened.
 pub fn next_daily_turn_at(now: DateTime<Local>, offset: TurnOffset) -> DateTime<Local> {

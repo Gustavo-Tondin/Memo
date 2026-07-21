@@ -7,7 +7,6 @@
   import PeriodView from "./lib/PeriodView.svelte";
   import CompletedView from "./lib/CompletedView.svelte";
   import TaskInspector from "./lib/TaskInspector.svelte";
-  import { COMPLETED_LIST, INBOX_LIST } from "./lib/names.js";
 
   let notebook = $state(null);
   let clock = $state(null);
@@ -73,8 +72,16 @@
     selected = null;
   });
 
+  // The names the core creates come over the bridge with the notebook. The
+  // frontend used to mirror them in a names.js — and when the core renamed
+  // the completed list, the mirror went stale and the screen read a file
+  // that no longer existed.
+  let layout = $derived(
+    notebook?.layout ?? { inbox: "Inbox", completed: "Completed" },
+  );
+
   let userLists = $derived(
-    (notebook?.lists ?? []).filter((name) => name !== COMPLETED_LIST),
+    (notebook?.lists ?? []).filter((name) => name !== layout.completed),
   );
 
   function fail(e) {
@@ -84,15 +91,20 @@
 
   const reload = () => (reloadKey += 1);
 
+  // One round trip instead of four: the auto-save calls this on every pause
+  // in typing, so the fan-out (info + clock + counts + conflicts) was the
+  // hottest path in the app.
   async function refreshNotebook() {
-    notebook = await api.currentNotebook();
-    if (!notebook) return;
-    clock = await api.periodClock();
-    // Counts come back empty when the user turned them off.
-    [counts, conflicts] = await Promise.all([
-      api.listCounts(),
-      api.listConflicts(),
-    ]);
+    try {
+      const snap = await api.notebookSnapshot();
+      notebook = snap.info;
+      clock = snap.clock;
+      counts = snap.counts;
+      conflicts = snap.conflicts;
+    } catch {
+      // No notebook open (or it just closed): back to onboarding.
+      notebook = null;
+    }
   }
 
   async function openAt(path) {
@@ -100,7 +112,6 @@
     error = null;
     try {
       notebook = await api.openNotebook(path);
-      clock = await api.periodClock();
       await refreshNotebook();
 
       // Only after the notebook is open do we know whether it wants the last
@@ -160,7 +171,7 @@
     try {
       const rescued = await api.deleteList(list);
       await refreshNotebook();
-      view = { kind: "list", list: INBOX_LIST };
+      view = { kind: "list", list: layout.inbox };
       reload();
       if (rescued > 0) {
         error = `${rescued} tarefa(s) de "${list}" foram movidas para a Inbox.`;
@@ -323,7 +334,7 @@
             onSelect={select}
             selectedId={selected?.task?.id ?? null}
           />
-          {#if !notebook.readOnly && view.list !== INBOX_LIST}
+          {#if !notebook.readOnly && view.list !== layout.inbox}
             <p class="list-actions">
               <button onclick={renameCurrentList}>renomear lista</button>
               <button onclick={deleteCurrentList}>apagar lista</button>
@@ -332,6 +343,7 @@
         {:else}
           <CompletedView
             readOnly={notebook.readOnly}
+            completedList={layout.completed}
             onChanged={refreshNotebook}
             onError={fail}
             {reloadKey}

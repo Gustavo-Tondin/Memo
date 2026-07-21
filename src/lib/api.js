@@ -7,6 +7,9 @@ import { invoke } from "@tauri-apps/api/core";
 
 export const api = {
   // notebook
+  // Everything the shell needs after any change, in one round trip —
+  // info (with the layout names), clock, counts and conflicts.
+  notebookSnapshot: () => invoke("notebook_snapshot"),
   lastNotebook: () => invoke("last_notebook"),
   pickFolder: () => invoke("pick_notebook_folder"),
   openNotebook: (path) => invoke("open_notebook", { path }),

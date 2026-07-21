@@ -10,6 +10,7 @@ pub mod clock;
 pub mod conflict;
 pub mod config;
 pub mod error;
+pub mod fsio;
 pub mod id;
 pub mod list;
 pub mod notebook;

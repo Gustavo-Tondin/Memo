@@ -2,9 +2,16 @@
   // Completed tasks. Unchecking one sends it back to the list it came from —
   // the core reads that from the `origin` recorded in the file.
   import { api } from "./api.js";
-  import { COMPLETED_LIST } from "./names.js";
 
-  let { readOnly, onChanged, onError, reloadKey } = $props();
+  // The list's on-disk name comes from the shell (NotebookInfo.layout); the
+  // default only covers the instant before the first snapshot arrives.
+  let {
+    readOnly,
+    onChanged,
+    onError,
+    reloadKey,
+    completedList = "Completed",
+  } = $props();
 
   let tasks = $state([]);
 
@@ -17,7 +24,7 @@
     try {
       // The list is named in English on disk since phase 5; the label the user
       // reads is a separate thing and stays translated.
-      tasks = await api.listTasks(COMPLETED_LIST);
+      tasks = await api.listTasks(completedList);
     } catch (e) {
       onError(e);
     }

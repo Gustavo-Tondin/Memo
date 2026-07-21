@@ -351,3 +351,86 @@ fn a_line_that_is_not_indented_is_not_absorbed() {
     assert!(matches!(list.lines().last(), Some(Line::Raw(_))));
     assert_eq!(list.render(), content);
 }
+
+// ------------------------------------------------------------------
+// Hostile round-trips (structural analysis 2026-07, items 2.2 and 2.3).
+// The promise under test: nothing a caller can write through the API may
+// silently change meaning on the next read.
+
+#[test]
+fn an_origin_with_spaces_survives_the_comment_round_trip() {
+    // `origin:Meu Mercado` used to read back as `Meu`, and undoing a
+    // completed task then CREATED a list called "Meu". Spaced names are a
+    // documented case — `Projeto Y.md` is the example in the spec.
+    let mut task = memo_core::Task::new("Pagar boleto");
+    task.id = Some("a1".into());
+    task.origin = Some("Meu Mercado".into());
+
+    let rendered = task.render_block();
+    assert!(
+        rendered.contains("origin:\"Meu Mercado\""),
+        "a spaced value must be quoted: {rendered}"
+    );
+
+    let reread = memo_core::TaskList::from_str(&rendered);
+    let back = reread.tasks().next().unwrap();
+    assert_eq!(back.origin.as_deref(), Some("Meu Mercado"));
+    assert_eq!(back.id.as_deref(), Some("a1"));
+}
+
+#[test]
+fn an_unspaced_origin_stays_unquoted_so_existing_files_do_not_change() {
+    let mut task = memo_core::Task::new("Pagar boleto");
+    task.id = Some("a1".into());
+    task.origin = Some("Compras".into());
+    assert!(task.render_block().contains("origin:Compras"));
+}
+
+#[test]
+fn a_hand_quoted_comment_field_is_read_even_with_other_fields_after_it() {
+    let task = memo_core::Task::parse(
+        r#"- [x] Pagar <!--id:a1 origin:"Projeto v2.0 Final" created:2026-07-01-->"#,
+    )
+    .unwrap();
+    assert_eq!(task.origin.as_deref(), Some("Projeto v2.0 Final"));
+    assert!(task.created.is_some(), "fields after the quoted one still parse");
+}
+
+#[test]
+fn normalize_tag_turns_anything_into_one_token_or_nothing() {
+    use memo_core::task::normalize_tag;
+    assert_eq!(normalize_tag("casa nova"), Some("casa-nova".into()));
+    assert_eq!(normalize_tag("  #urgent "), Some("urgent".into()));
+    assert_eq!(normalize_tag("##a  b   c"), Some("a-b-c".into()));
+    assert_eq!(normalize_tag("   "), None);
+    assert_eq!(normalize_tag("#"), None);
+}
+
+#[test]
+fn a_normalized_tag_round_trips_without_eating_the_metadata_line() {
+    // The bug this guards: tags = ["casa nova"] rendered as `#casa nova`,
+    // the loose word stopped the line from being all-tokens, and the whole
+    // line — date and priority included — silently became description.
+    let mut task = memo_core::Task::new("Comprar material");
+    task.due = chrono::NaiveDate::from_ymd_opt(2026, 7, 25);
+    task.priority = Some(2);
+    task.tags = vec![memo_core::task::normalize_tag("casa nova").unwrap()];
+
+    let reread = memo_core::TaskList::from_str(&task.render_block());
+    let back = reread.tasks().next().unwrap();
+    assert_eq!(back.due, task.due, "the date must survive");
+    assert_eq!(back.priority, Some(2), "the priority must survive");
+    assert_eq!(back.tags, vec!["casa-nova"]);
+    assert!(back.description.is_empty(), "nothing may degrade to description");
+}
+
+#[test]
+fn task_text_is_collapsed_to_a_single_line() {
+    // A `\n` inside a name would render as two lines and re-read as a task
+    // plus a stray description — same family of silent corruption.
+    let task = memo_core::Task::new("Comprar\nleite  integral");
+    assert_eq!(task.text, "Comprar leite integral");
+
+    let reread = memo_core::TaskList::from_str(&task.render_block());
+    assert_eq!(reread.tasks().count(), 1);
+}

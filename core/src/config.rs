@@ -14,7 +14,7 @@ use std::path::Path;
 use serde_json::{Map, Value};
 
 use crate::clock::{TurnOffset, WeekStart};
-use crate::error::{Error, IoContext, Result};
+use crate::error::{Error, Result};
 
 /// Schema version this build understands. A notebook declaring more than this
 /// was written by a newer app and opens read-only.
@@ -299,17 +299,9 @@ fn merge(target: &mut Value, patch: Value) {
     }
 }
 
-/// Same tmp-then-rename dance as the task lists: sync tools may read the file
-/// at any moment, and a half-written config is a broken notebook.
-pub(crate) fn write_atomically(path: &Path, bytes: &[u8]) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).ctx(parent)?;
-    }
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, bytes).ctx(&tmp)?;
-    std::fs::rename(&tmp, path).ctx(path)?;
-    Ok(())
-}
+/// The atomic write moved to [`crate::fsio`], where every kind of file shares
+/// it. Kept as a thin alias so existing callers read naturally.
+pub(crate) use crate::fsio::write_atomically;
 
 /// Sorted view of a JSON object, for stable assertions in tests.
 #[cfg(test)]

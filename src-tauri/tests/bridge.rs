@@ -667,3 +667,80 @@ fn opening_a_second_notebook_switches_the_open_one() {
     // The first notebook is untouched on disk, just no longer open.
     assert!(first.path().join("Tasks/SoNoPrimeiro.md").is_file());
 }
+
+#[test]
+fn the_snapshot_answers_everything_in_one_call() {
+    // Every UI action used to fan out into four invokes; the auto-save fires
+    // that on every pause in typing. One round trip keeps the cost flat as
+    // notebooks grow — and nothing is cached, the files stay the truth.
+    let (_lock, app, dir) = app_with_notebook();
+    ok(&app, "create_list", json!({ "name": "Compras" }));
+    ok(
+        &app,
+        "create_task",
+        json!({ "list": "Compras", "text": "Comprar leite" }),
+    );
+    std::fs::write(
+        dir.path()
+            .join("Tasks/Compras.sync-conflict-20260721-090000-ABC.md"),
+        "- [ ] versão do celular\n",
+    )
+    .unwrap();
+
+    let snap = ok(&app, "notebook_snapshot", json!({}));
+
+    assert_eq!(snap["info"]["lists"], json!(["Completed", "Compras", "Inbox"]));
+    assert_eq!(snap["info"]["layout"]["inbox"], "Inbox");
+    assert_eq!(snap["info"]["layout"]["completed"], "Completed");
+    assert_eq!(snap["counts"]["Compras"], json!(1));
+    assert_eq!(snap["conflicts"].as_array().unwrap().len(), 1);
+    assert_eq!(snap["clock"]["today"].as_str().unwrap().len(), 10);
+}
+
+#[test]
+fn a_spaced_list_survives_complete_and_undo_over_the_bridge() {
+    // The origin used to truncate at the first space, and undo then CREATED
+    // a list named after the first word. Spaced names are a documented case.
+    let (_lock, app, dir) = app_with_notebook();
+    ok(&app, "create_list", json!({ "name": "Meu Mercado" }));
+    let id = task_with_id(&app, "Meu Mercado", "Comprar arroz");
+
+    ok(&app, "complete_task", json!({ "list": "Meu Mercado", "id": id }));
+    let completed =
+        std::fs::read_to_string(dir.path().join("Tasks/Completed.md")).unwrap();
+    assert!(completed.contains("origin:\"Meu Mercado\""), "{completed}");
+
+    ok(&app, "uncomplete_task", json!({ "id": id }));
+    let tasks = ok(&app, "list_tasks", json!({ "list": "Meu Mercado" }));
+    assert_eq!(tasks[0]["text"], "Comprar arroz");
+    assert!(
+        !dir.path().join("Tasks/Meu.md").exists(),
+        "no ghost list named after the first word"
+    );
+}
+
+#[test]
+fn hostile_fields_are_normalized_by_the_core_not_trusted_to_the_ui() {
+    // A spaced tag written raw would turn the whole metadata line into
+    // description on the next read — silently deleting the date with it. The
+    // rule lives in the core so every client is covered, not just our UI.
+    let (_lock, app, _dir) = app_with_notebook();
+    let id = task_with_id(&app, "Inbox", "Comprar material");
+
+    ok(
+        &app,
+        "set_task_fields",
+        json!({ "list": "Inbox", "id": id, "fields": {
+            "due": "2026-07-25",
+            "tags": ["casa nova", "#urgent", "casa nova", "  "],
+            "text": "Comprar\nmaterial",
+            "subtasks": [{ "text": "Cimento\nCP-II", "done": false }]
+        }}),
+    );
+
+    let tasks = ok(&app, "list_tasks", json!({ "list": "Inbox" }));
+    assert_eq!(tasks[0]["tags"], json!(["casa-nova", "urgent"]));
+    assert_eq!(tasks[0]["due"], "2026-07-25", "the date must survive the tag");
+    assert_eq!(tasks[0]["text"], "Comprar material");
+    assert_eq!(tasks[0]["subtasks"][0]["text"], "Cimento CP-II");
+}

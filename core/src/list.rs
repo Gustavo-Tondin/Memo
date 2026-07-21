@@ -8,7 +8,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use crate::error::{Error, IoContext, Result};
+use crate::error::{Error, Result};
 use crate::id;
 use crate::task::Task;
 
@@ -189,12 +189,13 @@ impl TaskList {
     }
 
     /// Replaces the text of an existing task, leaving everything else alone.
+    /// The text is collapsed to a single line, like everything user-typed.
     pub fn edit_text(&mut self, id: &str, text: impl Into<String>) -> Result<()> {
         let at = self
             .position_of(id)
             .ok_or_else(|| Error::TaskNotFound(id.to_string()))?;
         if let Line::Task(task) = &mut self.lines[at] {
-            task.text = text.into();
+            task.text = crate::task::single_line(&text.into());
         }
         Ok(())
     }
@@ -326,12 +327,6 @@ impl TaskList {
     /// Writes the list to disk atomically: a half-written list would be a
     /// corrupted notebook, and sync tools may read the file at any moment.
     pub fn save(&self) -> Result<()> {
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent).ctx(parent)?;
-        }
-        let tmp = self.path.with_extension("md.tmp");
-        std::fs::write(&tmp, self.render()).ctx(&tmp)?;
-        std::fs::rename(&tmp, &self.path).ctx(&self.path)?;
-        Ok(())
+        crate::fsio::write_atomically(&self.path, self.render().as_bytes())
     }
 }

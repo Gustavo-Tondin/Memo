@@ -960,3 +960,51 @@ fn the_whole_phase_two_scenario_end_to_end() {
     assert!(!task.done);
     assert!(read(dir.path().join("Tasks/Completed.md")).trim().is_empty());
 }
+
+// ------------------------------------------------------------------
+// Spaced list names, end to end (structural analysis 2026-07, item 2.2).
+// The fixtures elsewhere mostly use one-word names, which is exactly how the
+// origin truncation shipped unseen. This one drives the whole cycle on disk.
+
+#[test]
+fn completing_and_undoing_in_a_spaced_list_round_trips() {
+    let dir = tempfile::tempdir().unwrap();
+    let notebook = memo_core::Notebook::init(dir.path()).unwrap();
+    notebook.create_list("Meu Mercado").unwrap();
+
+    let mut list = notebook.open_list("Meu Mercado").unwrap();
+    let id = list.add_text_with_id("Comprar arroz");
+    list.save().unwrap();
+
+    notebook.complete_task("Meu Mercado", &id).unwrap();
+    let completed =
+        std::fs::read_to_string(dir.path().join("Tasks/Completed.md")).unwrap();
+    assert!(
+        completed.contains("origin:\"Meu Mercado\""),
+        "the spaced origin must be quoted on disk: {completed}"
+    );
+
+    notebook.uncomplete_task(&id).unwrap();
+    let back = notebook.open_list("Meu Mercado").unwrap();
+    assert!(
+        back.find(&id).is_some(),
+        "undo must land in the original spaced list"
+    );
+    // And no truncated ghost list may appear.
+    assert!(
+        !dir.path().join("Tasks/Meu.md").exists(),
+        "undo must not create a list named after the first word"
+    );
+}
+
+#[test]
+fn a_quote_in_a_list_name_is_refused() {
+    // `"` is the comment quote character; a name carrying it would break the
+    // parsing of every task completed from that list.
+    let dir = tempfile::tempdir().unwrap();
+    let notebook = memo_core::Notebook::init(dir.path()).unwrap();
+    assert!(matches!(
+        notebook.create_list("Mi\"casa"),
+        Err(memo_core::Error::InvalidListName(_))
+    ));
+}

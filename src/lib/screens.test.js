@@ -702,22 +702,28 @@ describe("App", () => {
     name: "n",
     readOnly: false,
     lists: ["Inbox", "Completed"],
+    // The on-disk names travel with the notebook since the snapshot command;
+    // the frontend no longer mirrors them in a names.js.
+    layout: { inbox: "Inbox", completed: "Completed" },
   };
 
   const shell = (extra = {}) =>
     bridge({
       last_notebook: "/n",
       open_notebook: notebook,
-      current_notebook: notebook,
-      screen_to_restore: "list:Inbox",
-      list_counts: {},
-      list_conflicts: [],
-      period_clock: {
-        today: "2026-07-21",
-        weekStart: "2026-07-20",
-        nextDailyTurn: "2026-07-22T00:00:00Z",
-        nextWeeklyTurn: "2026-07-27T00:00:00Z",
+      // One round trip for everything the shell shows after any change.
+      notebook_snapshot: {
+        info: notebook,
+        clock: {
+          today: "2026-07-21",
+          weekStart: "2026-07-20",
+          nextDailyTurn: "2026-07-22T00:00:00Z",
+          nextWeeklyTurn: "2026-07-27T00:00:00Z",
+        },
+        counts: {},
+        conflicts: [],
       },
+      screen_to_restore: "list:Inbox",
       list_tasks: [task("a1", "Comprar leite"), task("b2", "Pagar boleto")],
       period_tasks: [],
       grouped_suggestions: [],

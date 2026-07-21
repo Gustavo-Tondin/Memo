@@ -251,7 +251,7 @@ impl Notebook {
         if path.exists() {
             return Ok(());
         }
-        std::fs::write(&path, FORMAT_GUIDE).ctx(&path)
+        crate::fsio::write_atomically(&path, FORMAT_GUIDE.as_bytes())
     }
 
     /// Opens the notebook, creating it if the folder is not one yet.
@@ -314,10 +314,14 @@ impl Notebook {
 
     /// Path of a list by name. Rejects anything that could escape the tasks
     /// folder — list names reach this from user input.
+    ///
+    /// `"` is rejected because it is the quote character of the hidden
+    /// comment (`origin:"Meu Mercado"`): allowing it in a name would let a
+    /// list break the parsing of every task completed from it.
     pub fn list_path(&self, name: &str) -> Result<PathBuf> {
         let invalid = name.trim().is_empty()
             || name.starts_with('.')
-            || name.contains(['/', '\\', '\0'])
+            || name.contains(['/', '\\', '\0', '"'])
             || name.contains("..");
         if invalid {
             return Err(Error::InvalidListName(name.to_string()));
@@ -470,7 +474,7 @@ impl Notebook {
         for name in [INBOX_LIST, COMPLETED_LIST] {
             let path = self.list_path(name)?;
             if !path.exists() {
-                std::fs::write(&path, "").ctx(&path)?;
+                crate::fsio::write_atomically(&path, b"")?;
             }
         }
         Ok(())
@@ -483,10 +487,7 @@ impl Notebook {
         if path.exists() {
             return Err(Error::InvalidListName(format!("{name} already exists")));
         }
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).ctx(parent)?;
-        }
-        std::fs::write(&path, "").ctx(&path)?;
+        crate::fsio::write_atomically(&path, b"")?;
         TaskList::load(path)
     }
 
@@ -647,11 +648,12 @@ impl Notebook {
     /// notebook is reopened. The core cannot own a timer without dragging in a
     /// runtime, so it answers "when" and the app schedules the wake-up.
     pub fn next_turn_at(&self, period: Period) -> chrono::DateTime<chrono::Local> {
-        let now = chrono::Local::now();
+        // The clock module reads the instant: this used to call Local::now()
+        // here, which the invariant test now flags — the configured turn only
+        // stays honest while clock.rs is the single reader.
         match period {
-            Period::Day => clock::next_daily_turn_at(now, self.config.rollover.daily.at),
-            Period::Week => clock::next_weekly_turn_at(
-                now,
+            Period::Day => clock::next_daily_turn(self.config.rollover.daily.at),
+            Period::Week => clock::next_weekly_turn(
                 self.config.rollover.weekly.at,
                 self.config.rollover.weekly.starts_on,
             ),

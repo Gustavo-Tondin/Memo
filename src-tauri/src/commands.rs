@@ -17,6 +17,19 @@ use tauri_plugin_dialog::DialogExt;
 use crate::error::CommandResult;
 use crate::state::AppState;
 
+/// The names the core creates, so the frontend never hard-codes them.
+///
+/// The frontend used to mirror these in a `names.js` — and when the core
+/// renamed `Completas` to `Completed` in phase 5, the completed screen kept
+/// reading a file that no longer existed and showed "nothing done yet"
+/// forever. Coming over the bridge, a rename reaches every screen at once.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotebookLayout {
+    pub inbox: String,
+    pub completed: String,
+}
+
 /// What the frontend needs to know about the open notebook.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,6 +39,7 @@ pub struct NotebookInfo {
     pub name: String,
     pub read_only: bool,
     pub lists: Vec<String>,
+    pub layout: NotebookLayout,
 }
 
 impl NotebookInfo {
@@ -39,6 +53,10 @@ impl NotebookInfo {
                 .unwrap_or_default(),
             read_only: notebook.is_read_only(),
             lists: notebook.list_names()?,
+            layout: NotebookLayout {
+                inbox: memo_core::INBOX_LIST.to_string(),
+                completed: memo_core::COMPLETED_LIST.to_string(),
+            },
         })
     }
 }
@@ -385,7 +403,7 @@ pub fn set_task_fields(
         let task = tasks.task_mut(&id)?;
 
         if let Some(text) = fields.text {
-            task.text = text;
+            task.text = memo_core::task::single_line(&text);
         }
         if let Some(due) = fields.due {
             // An unparseable date clears it rather than being stored wrong.
@@ -395,10 +413,28 @@ pub fn set_task_fields(
             task.priority = priority.filter(|p| (1..=3).contains(p));
         }
         if let Some(tags) = fields.tags {
-            task.tags = tags;
+            // Normalised by the core: a spaced tag would silently turn the
+            // whole metadata line into description on the next read.
+            let mut cleaned: Vec<String> = Vec::new();
+            for tag in &tags {
+                if let Some(tag) = memo_core::task::normalize_tag(tag) {
+                    if !cleaned.contains(&tag) {
+                        cleaned.push(tag);
+                    }
+                }
+            }
+            task.tags = cleaned;
         }
         if let Some(description) = fields.description {
-            task.description = description;
+            // An embedded newline becomes a further line; a blank line would
+            // end the task's block in the file and cut the description short.
+            task.description = description
+                .iter()
+                .flat_map(|entry| entry.lines())
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(str::to_string)
+                .collect();
         }
         if let Some(repeat) = fields.repeat {
             task.repeat = repeat.as_deref().and_then(memo_core::task::Repeat::parse);
@@ -407,7 +443,7 @@ pub fn set_task_fields(
             task.subtasks = subtasks
                 .into_iter()
                 .map(|s| memo_core::task::Subtask {
-                    text: s.text,
+                    text: memo_core::task::single_line(&s.text),
                     done: s.done,
                 })
                 .collect();
@@ -519,16 +555,18 @@ pub struct PeriodClock {
     pub next_weekly_turn: String,
 }
 
+fn clock_of(nb: &Notebook) -> PeriodClock {
+    PeriodClock {
+        today: nb.today().to_string(),
+        week_start: nb.current_week().to_string(),
+        next_daily_turn: nb.next_turn_at(Period::Day).to_rfc3339(),
+        next_weekly_turn: nb.next_turn_at(Period::Week).to_rfc3339(),
+    }
+}
+
 #[tauri::command]
 pub fn period_clock(state: State<'_, AppState>) -> CommandResult<PeriodClock> {
-    state.with_notebook(|nb| {
-        Ok(PeriodClock {
-            today: nb.today().to_string(),
-            week_start: nb.current_week().to_string(),
-            next_daily_turn: nb.next_turn_at(Period::Day).to_rfc3339(),
-            next_weekly_turn: nb.next_turn_at(Period::Week).to_rfc3339(),
-        })
-    })
+    state.with_notebook(|nb| Ok(clock_of(nb)))
 }
 
 /// Re-reads both period states, applying any rollover that came due while the
@@ -547,6 +585,39 @@ pub fn refresh_periods(state: State<'_, AppState>) -> CommandResult<Vec<PeriodSt
 #[tauri::command]
 pub fn is_notebook_open(state: State<'_, AppState>) -> bool {
     state.is_open()
+}
+
+/// Everything the shell of the UI needs after any change, in one round trip.
+///
+/// Every action used to fan out into four `invoke()`s (info, clock, counts,
+/// conflicts) — and the auto-save fires that cascade on every pause in
+/// typing. One command keeps the cost flat as notebooks grow. This is
+/// consolidation of round trips only: nothing is cached, the files stay the
+/// source of truth, and each call re-reads them.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotebookSnapshot {
+    pub info: NotebookInfo,
+    pub clock: PeriodClock,
+    /// Empty when the user turned the counters off.
+    pub counts: std::collections::BTreeMap<String, usize>,
+    pub conflicts: Vec<Conflict>,
+}
+
+#[tauri::command]
+pub fn notebook_snapshot(state: State<'_, AppState>) -> CommandResult<NotebookSnapshot> {
+    state.with_notebook(|nb| {
+        Ok(NotebookSnapshot {
+            info: NotebookInfo::of(nb)?,
+            clock: clock_of(nb),
+            counts: if nb.config().show_list_counts {
+                nb.open_task_counts()?
+            } else {
+                Default::default()
+            },
+            conflicts: nb.conflicts()?,
+        })
+    })
 }
 
 /// Suggestions with the reason each one is being offered, so the UI can group

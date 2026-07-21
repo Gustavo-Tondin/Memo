@@ -140,10 +140,11 @@ pub struct Task {
 }
 
 impl Task {
-    /// Builds a new, unsaved task.
+    /// Builds a new, unsaved task. The text is collapsed to a single line —
+    /// see [`single_line`] for why a stray `\n` is corruption, not content.
     pub fn new(text: impl Into<String>) -> Self {
         Self {
-            text: text.into(),
+            text: single_line(&text.into()),
             ..Default::default()
         }
     }
@@ -287,10 +288,10 @@ impl Task {
     fn render_comment(&self) -> Option<String> {
         let mut fields: Vec<String> = Vec::new();
         if let Some(id) = &self.id {
-            fields.push(format!("id:{id}"));
+            fields.push(format!("id:{}", quote_if_spaced(id)));
         }
         if let Some(origin) = &self.origin {
-            fields.push(format!("origin:{origin}"));
+            fields.push(format!("origin:{}", quote_if_spaced(origin)));
         }
         if let Some(created) = self.created {
             fields.push(format!("created:{created}"));
@@ -369,6 +370,34 @@ fn parse_field(body: &str) -> Option<(&str, &str)> {
         .then(|| (key, value.trim()))
 }
 
+/// Normalises a tag into a single `#`-less token, or `None` when nothing is
+/// left.
+///
+/// This is a **format rule, so it lives in the core**: a tag containing a
+/// space renders as `#casa nova`, the loose word stops the metadata line from
+/// being all-tokens, and on the next read the whole line silently degrades to
+/// description — taking the date and the priority down with it. Every writer
+/// (the app today, another frontend tomorrow) has to go through this; a UI
+/// may still clean tags earlier for nicer feedback, but the core is the wall.
+pub fn normalize_tag(text: &str) -> Option<String> {
+    let cleaned = text
+        .trim()
+        .trim_start_matches('#')
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join("-");
+    (!cleaned.is_empty()).then_some(cleaned)
+}
+
+/// Collapses a would-be single line into one: newlines become spaces.
+///
+/// A task name or subtask with a `\n` inside would render as two lines and
+/// re-read as something else entirely — same family of silent corruption as
+/// the spaced tag.
+pub fn single_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// Accepts the canonical ISO form and the two shapes people type by hand.
 /// Written back as ISO, so a hand-typed date is normalised on the next save.
 pub fn parse_date(text: &str) -> Option<NaiveDate> {
@@ -394,10 +423,34 @@ fn split_trailing_comment(body: &str) -> (&str, Option<String>) {
     (&trimmed[..open_at], Some(inner))
 }
 
-/// Reads a `key:value` field, where the value runs to the next whitespace.
+/// Wraps a comment value in quotes when it contains whitespace.
+///
+/// `origin:Meu Mercado` used to be read back as `Meu` — the reader stops at
+/// whitespace — so undoing a completed task **created a new list** with the
+/// truncated name. Spaced list names are a documented case (`Projeto Y.md` is
+/// the example in the spec), and phase 7 turns every origin into a relative
+/// path, where spaces are the norm. Quoting only when needed keeps every file
+/// already on disk byte-identical.
+fn quote_if_spaced(value: &str) -> String {
+    if value.chars().any(char::is_whitespace) {
+        format!("\"{value}\"")
+    } else {
+        value.to_string()
+    }
+}
+
+/// Reads a `key:value` field. A quoted value runs to the closing quote, an
+/// unquoted one to the next whitespace — see [`quote_if_spaced`].
 fn read_field<'a>(comment: &'a str, key: &str) -> Option<&'a str> {
     let start = find_field(comment, key)? + key.len();
-    let value = comment[start..].split_whitespace().next().unwrap_or_default();
+    let rest = &comment[start..];
+
+    if let Some(quoted) = rest.strip_prefix('"') {
+        let end = quoted.find('"')?;
+        return (end > 0).then(|| &quoted[..end]);
+    }
+
+    let value = rest.split_whitespace().next().unwrap_or_default();
     (!value.is_empty()).then_some(value)
 }
 
