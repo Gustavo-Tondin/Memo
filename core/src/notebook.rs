@@ -33,43 +33,6 @@ use crate::state::{Period, StateFile};
 use crate::task::Task;
 use crate::{COMPLETED_LIST, INBOX_LIST, NOTEBOOK_CONFIG_DIR, NOTES_DIR, TASKS_DIR};
 
-/// Written into every new notebook, for whoever opens the folder without the
-/// app. Deliberately short: someone reading this is looking at a text file,
-/// not at documentation.
-const FORMAT_GUIDE: &str = "\
-These are plain Markdown checklists. Edit them in any text editor —
-Memo reads whatever you write.
-
-  - [ ] Buy milk
-  - [x] Pay the bill
-
-You can add details on indented lines below a task:
-
-  - [ ] Buy building material
-    @2026-07-25 #home #urgent !2
-    Talk to Jorge first, he gives a discount.
-    repeat: every-week
-    - [ ] Cement
-    - [ ] Sand
-
-  @2026-07-25   a date, always year-month-day
-  #home         a tag
-  !1 to !3      priority, 1 is highest
-  repeat:       every-day, every-week, every-month, every-3-days...
-  - [ ] ...     a subtask
-  anything else on an indented line is a description
-
-Two tags mean something to the app: #urgent and #pinned.
-
-The <!--id:...--> comments are Memo's. It adds one to a task only when it
-needs to keep track of it — when you pull it into your day or week, or
-complete it. You never have to write those yourself, and you can leave them
-alone.
-
-Delete a list file and Memo forgets that list. Inbox.md and Completed.md
-come back automatically.
-";
-
 /// What to do with a task's `origin` field when moving it between lists.
 ///
 /// The writer stays mechanical on purpose — deciding *when* to record an
@@ -241,17 +204,8 @@ impl Notebook {
         Ok(notebook)
     }
 
-    /// Drops a plain-text guide next to the lists, for whoever opens the
-    /// folder without the app.
-    ///
-    /// `.txt` on purpose: the app only reads `.md`, so the guide never shows
-    /// up as a list.
     fn write_format_guide(&self) -> Result<()> {
-        let path = self.tasks_dir().join("_FORMAT.txt");
-        if path.exists() {
-            return Ok(());
-        }
-        crate::fsio::write_atomically(&path, FORMAT_GUIDE.as_bytes())
+        self.tasks_folder().write_format_guide()
     }
 
     /// Opens the notebook, creating it if the folder is not one yet.
@@ -269,6 +223,16 @@ impl Notebook {
 
     pub fn tasks_dir(&self) -> PathBuf {
         self.root.join(TASKS_DIR)
+    }
+
+    /// The folder of lists a `tasks` widget owns — today, always `Tasks/`.
+    ///
+    /// Extracted in phase 7 (step B): everything that only needs "a folder
+    /// of lists" lives on [`TaskFolder`], so the second tasks widget is a
+    /// different folder, not a rewrite. The notebook keeps the rules that
+    /// coordinate across files — states, completion, suggestions.
+    pub fn tasks_folder(&self) -> crate::folder::TaskFolder {
+        crate::folder::TaskFolder::new(self.tasks_dir())
     }
 
     pub fn notes_dir(&self) -> PathBuf {
@@ -312,75 +276,20 @@ impl Notebook {
         Ok(())
     }
 
-    /// Path of a list by name. Rejects anything that could escape the tasks
-    /// folder — list names reach this from user input.
-    ///
-    /// `"` is rejected because it is the quote character of the hidden
-    /// comment (`origin:"Meu Mercado"`): allowing it in a name would let a
-    /// list break the parsing of every task completed from it.
+    /// Path of a list by name — see [`crate::folder::TaskFolder::list_path`]
+    /// for the validation rules.
     pub fn list_path(&self, name: &str) -> Result<PathBuf> {
-        let invalid = name.trim().is_empty()
-            || name.starts_with('.')
-            || name.contains(['/', '\\', '\0', '"'])
-            || name.contains("..");
-        if invalid {
-            return Err(Error::InvalidListName(name.to_string()));
-        }
-        Ok(self.tasks_dir().join(format!("{name}.md")))
+        self.tasks_folder().list_path(name)
     }
 
     /// Every list in the notebook, alphabetically.
     pub fn list_names(&self) -> Result<Vec<String>> {
-        let dir = self.tasks_dir();
-        let mut names = Vec::new();
-        let entries = match std::fs::read_dir(&dir) {
-            Ok(entries) => entries,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(names),
-            Err(e) => return Err(Error::Io { path: dir, source: e }),
-        };
-
-        for entry in entries {
-            let entry = entry.ctx(&dir)?;
-            let path = entry.path();
-            // A copy left behind by a sync tool is not a list the user made.
-            if crate::conflict::is_conflict_file(&path) {
-                continue;
-            }
-            if path.extension().is_some_and(|ext| ext == "md") {
-                if let Some(stem) = path.file_stem() {
-                    names.push(stem.to_string_lossy().to_string());
-                }
-            }
-        }
-        names.sort();
-        Ok(names)
+        self.tasks_folder().list_names()
     }
 
     /// How many open tasks each list has, for the navigation.
-    ///
-    /// One pass over the whole notebook instead of one read per list: the
-    /// sidebar shows every count at once, so asking list by list would re-read
-    /// the same folder N times on every render.
-    ///
-    /// Counts **open** tasks — a list of finished things reads as empty, which
-    /// is what "3 left to do" means to someone looking at a sidebar. The
-    /// completed list is skipped entirely, since everything in it is done.
     pub fn open_task_counts(&self) -> Result<BTreeMap<String, usize>> {
-        let mut counts = BTreeMap::new();
-        for name in self.list_names()? {
-            if name == COMPLETED_LIST {
-                continue;
-            }
-            // Reading without adopting ids: counting is not a reason to write
-            // to every file in the notebook.
-            let open = self
-                .open_list(&name)?
-                .tasks()
-                .filter(|task| !task.done)
-                .count();
-            counts.insert(name, open);
-        }
-        Ok(counts)
+        self.tasks_folder().open_task_counts()
     }
 
     /// Conflicting copies sitting in the notebook right now.
@@ -407,7 +316,7 @@ impl Notebook {
     }
 
     pub fn open_list(&self, name: &str) -> Result<TaskList> {
-        TaskList::load(self.list_path(name)?)
+        self.tasks_folder().open_list(name)
     }
 
     /// Tasks of a list, ready to show.
@@ -466,18 +375,10 @@ impl Notebook {
         name == INBOX_LIST || name == COMPLETED_LIST
     }
 
-    /// Recreates `Inbox.md` and `Completas.md` when missing. Called on every
+    /// Recreates `Inbox.md` and `Completed.md` when missing. Called on every
     /// open: the user may have deleted them, and the app must not break.
     pub fn ensure_default_lists(&self) -> Result<()> {
-        let dir = self.tasks_dir();
-        std::fs::create_dir_all(&dir).ctx(&dir)?;
-        for name in [INBOX_LIST, COMPLETED_LIST] {
-            let path = self.list_path(name)?;
-            if !path.exists() {
-                crate::fsio::write_atomically(&path, b"")?;
-            }
-        }
-        Ok(())
+        self.tasks_folder().ensure_default_lists()
     }
 
     /// Creates a new list. Fails if one with that name already exists.
