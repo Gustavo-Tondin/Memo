@@ -6,7 +6,7 @@
 // the core does the right thing with those calls — that lives in Rust, and
 // duplicating it here would just be a slower copy.
 
-import { render, screen, waitFor } from "@testing-library/svelte";
+import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -18,6 +18,7 @@ const { default: ListView } = await import("./ListView.svelte");
 const { default: PeriodView } = await import("./PeriodView.svelte");
 const { default: CompletedView } = await import("./CompletedView.svelte");
 const { default: TaskInspector } = await import("./TaskInspector.svelte");
+const { default: App } = await import("../App.svelte");
 
 const task = (id, text, extra = {}) => ({
   id,
@@ -449,7 +450,11 @@ describe("TaskInspector", () => {
       props: props(task("a1", "Comprar leite", { due: "2026-07-25" })),
     });
 
-    await userEvent.clear(await screen.findByLabelText("Data"));
+    // `change`, not typing: the field only reports whole dates (see the
+    // comment on the input), and clearing it is a whole value too.
+    await fireEvent.change(await screen.findByLabelText("Data"), {
+      target: { value: "" },
+    });
 
     await waitFor(() => expect(lastSave().fields.due).toBe(null));
   });
@@ -600,5 +605,111 @@ describe("TaskInspector", () => {
     expect(screen.queryByPlaceholderText("Nova tag…")).toBeNull();
     expect(screen.getByLabelText("nome da tarefa").disabled).toBe(true);
     expect(saveCount()).toBe(0);
+  });
+});
+
+describe("App", () => {
+  // The shell had no tests until three bugs in a row turned out to live here:
+  // a completed list read by the wrong name, a panel that closed on every
+  // save, and a click-away rule that swallowed clicks meant for a control.
+  // None of them could be seen from a single screen's test.
+  const notebook = {
+    path: "/n",
+    name: "n",
+    readOnly: false,
+    lists: ["Inbox", "Completed"],
+  };
+
+  const shell = (extra = {}) =>
+    bridge({
+      last_notebook: "/n",
+      open_notebook: notebook,
+      current_notebook: notebook,
+      screen_to_restore: "list:Inbox",
+      list_counts: {},
+      list_conflicts: [],
+      period_clock: {
+        today: "2026-07-21",
+        weekStart: "2026-07-20",
+        nextDailyTurn: "2026-07-22T00:00:00Z",
+        nextWeeklyTurn: "2026-07-27T00:00:00Z",
+      },
+      list_tasks: [task("a1", "Comprar leite"), task("b2", "Pagar boleto")],
+      period_tasks: [],
+      grouped_suggestions: [],
+      set_task_fields: null,
+      ...extra,
+    });
+
+  const openTask = async (text) => {
+    await userEvent.click(await screen.findByText(text));
+    return await screen.findByLabelText("nome da tarefa");
+  };
+
+  test("the completed list is not offered as one of the user's lists", async () => {
+    // It is created by the app on every open, so showing it next to Compras
+    // and Projeto Y would just be confusing — and renaming it is refused.
+    shell();
+    render(App);
+
+    await screen.findByText("Comprar leite");
+    const sidebar = screen.getAllByText("Completas");
+    // Exactly one: the dedicated button, never a second entry among the lists.
+    expect(sidebar.length).toBe(1);
+  });
+
+  test("saving a task leaves the inspector open", async () => {
+    // Saving refreshes the notebook, and the effect that closes the panel on
+    // navigation used to depend on it. Editing the date closed the panel
+    // between choosing the month and choosing the day.
+    shell();
+    render(App);
+
+    await openTask("Comprar leite");
+    await userEvent.type(await screen.findByPlaceholderText("Nova tag…"), "casa{enter}");
+
+    await waitFor(() =>
+      expect(invoke.mock.calls.some(([cmd]) => cmd === "set_task_fields")).toBe(true),
+    );
+    expect(screen.queryByLabelText("nome da tarefa")).not.toBeNull();
+  });
+
+  test("clicking another task swaps the panel instead of closing it", async () => {
+    shell();
+    render(App);
+
+    await openTask("Comprar leite");
+    expect(screen.getByLabelText("nome da tarefa").value).toBe("Comprar leite");
+
+    await userEvent.click(screen.getByText("Pagar boleto"));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("nome da tarefa").value).toBe("Pagar boleto"),
+    );
+  });
+
+  test("only the empty space closes the panel", async () => {
+    shell();
+    const { container } = render(App);
+
+    await openTask("Comprar leite");
+
+    // A control inside a screen keeps the panel open…
+    await userEvent.click(screen.getByPlaceholderText("Nova tarefa…"));
+    expect(screen.queryByLabelText("nome da tarefa")).not.toBeNull();
+
+    // …and the bare content area closes it.
+    await fireEvent.click(container.querySelector(".content"));
+    await waitFor(() => expect(screen.queryByLabelText("nome da tarefa")).toBeNull());
+  });
+
+  test("changing screen closes the panel", async () => {
+    shell();
+    render(App);
+
+    await openTask("Comprar leite");
+    await userEvent.click(screen.getByText("Hoje"));
+
+    await waitFor(() => expect(screen.queryByLabelText("nome da tarefa")).toBeNull());
   });
 });

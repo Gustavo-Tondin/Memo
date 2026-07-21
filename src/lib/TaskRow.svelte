@@ -69,7 +69,7 @@
   {:else}
     <button
       class="text"
-      onclick={(e) => (e.stopPropagation(), onSelect?.(list, task))}
+      onclick={() => onSelect?.(list, task)}
       ondblclick={startEditing}
       title="clique para abrir, duplo clique para renomear"
     >

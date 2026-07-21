@@ -23,10 +23,17 @@
 
   const select = (list, task) => (selected = { list, task });
 
-  // Clicking away from the task closes the panel. Selecting a task stops the
-  // click from bubbling (see TaskRow), so this only fires on the space around
-  // the rows — clicking another task swaps the panel instead of closing it.
-  const clickedAway = () => (selected = null);
+  // Only the empty space closes the panel: `target === currentTarget` means
+  // the click landed on the content area itself and not on anything drawn in
+  // it. Clicking another task opens that one, and clicking a checkbox, a
+  // button or a field inside a screen does what it says and nothing else.
+  //
+  // Checking the target beats hanging `stopPropagation` on every control —
+  // that list is never complete, and each thing forgotten silently closes a
+  // panel the user was typing into.
+  const clickedAway = (event) => {
+    if (event.target === event.currentTarget) selected = null;
+  };
 
   function onKeydown(event) {
     if (event.key === "Escape" && selected) selected = null;
@@ -50,13 +57,21 @@
 
   // Records where the user is. The shell ignores this when the notebook has
   // the preference off, so no check is needed here.
-  //
-  // Changing screen also closes the inspector: the panel would otherwise keep
-  // showing a task from a list that is no longer on screen.
   $effect(() => {
     const id = viewToId(view);
-    selected = null;
     if (notebook) api.rememberScreen(id).catch(() => {});
+  });
+
+  // Leaving a screen closes the inspector — it would otherwise keep showing a
+  // task from a list that is no longer visible.
+  //
+  // This depends on `view` and nothing else, on purpose. It used to read
+  // `notebook` as well, and since every save refreshes the notebook, the
+  // panel slammed shut on each auto-save: picking a month in the date field
+  // closed the panel before the day could be chosen.
+  $effect(() => {
+    view;
+    selected = null;
   });
 
   let userLists = $derived(

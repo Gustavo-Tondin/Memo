@@ -274,7 +274,16 @@
   <section class="fields">
     <label>
       Data
-      <input type="date" bind:value={draft.due} disabled={readOnly} />
+      <!-- `onchange`, not `bind:value`: a date field emits `input` for every
+           half-typed value while the picker is open, so binding it would save
+           an empty date between choosing the month and choosing the day.
+           `change` only fires once the value is a whole date, or cleared. -->
+      <input
+        type="date"
+        value={draft.due}
+        onchange={(e) => (draft.due = e.currentTarget.value)}
+        disabled={readOnly}
+      />
     </label>
 
     <label>

@@ -129,9 +129,7 @@
             <li>
               <button
                 class="text"
-                onclick={(e) => (
-                  e.stopPropagation(), onSelect?.(entry.list, entry.task)
-                )}
+                onclick={() => onSelect?.(entry.list, entry.task)}
                 title="clique para abrir">{entry.task.text}</button
               >
               {#if entry.task.due}<small class="due">{entry.task.due}</small>{/if}
