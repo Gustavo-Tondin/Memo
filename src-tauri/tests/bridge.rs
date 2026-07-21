@@ -838,3 +838,112 @@ fn a_widget_folder_that_tries_to_escape_is_flagged_not_fatal() {
     assert_eq!(widgets[0]["invalidFolder"], json!(true));
     assert_eq!(widgets[1]["folder"], "Evil/Ok", "the healthy sibling still works");
 }
+
+#[test]
+fn the_note_lifecycle_over_the_bridge() {
+    // Phase 8's exit criterion, driven through the real IPC: jot it down,
+    // find it by search, delete it — with the file readable outside the app.
+    let (_lock, app, dir) = app_with_notebook();
+
+    let path = ok(
+        &app,
+        "create_note",
+        json!({ "folder": "Notes", "inFolder": "Inbox", "title": "Ideia de produto" }),
+    );
+    let path = path.as_str().unwrap().to_string();
+    assert_eq!(path, "Inbox/Ideia de produto.md");
+
+    ok(
+        &app,
+        "write_note",
+        json!({ "folder": "Notes", "path": path, "body": "Um leitor de markdown.\n" }),
+    );
+
+    let note = ok(&app, "read_note", json!({ "folder": "Notes", "path": path }));
+    assert_eq!(note["title"], "Ideia de produto");
+    assert_eq!(note["body"], "Um leitor de markdown.\n");
+    assert_eq!(note["pinned"], json!(false));
+    assert!(note["created"].is_string(), "the app adopted a creation date");
+
+    let found = ok(
+        &app,
+        "list_notes",
+        json!({ "folder": "Notes", "query": "leitor" }),
+    );
+    assert_eq!(found.as_array().unwrap().len(), 1);
+    assert_eq!(found[0]["title"], "Ideia de produto");
+    assert_eq!(found[0]["folder"], "Inbox");
+    assert!(found[0]["preview"].as_str().unwrap().contains("markdown"));
+
+    // Readable outside the app, in the documented shape.
+    let on_disk =
+        std::fs::read_to_string(dir.path().join("Notes/Inbox/Ideia de produto.md")).unwrap();
+    assert!(on_disk.starts_with("---\ncreated: "), "{on_disk}");
+    assert!(on_disk.ends_with("---\n\nUm leitor de markdown.\n"));
+
+    ok(&app, "delete_note", json!({ "folder": "Notes", "path": path }));
+    let left = ok(&app, "list_notes", json!({ "folder": "Notes" }));
+    assert_eq!(left, json!([]));
+}
+
+#[test]
+fn notes_can_be_pinned_renamed_moved_and_foldered() {
+    let (_lock, app, dir) = app_with_notebook();
+    let path = ok(
+        &app,
+        "create_note",
+        json!({ "folder": "Notes", "inFolder": "Inbox", "title": "rascunho" }),
+    );
+    let path = path.as_str().unwrap().to_string();
+
+    ok(
+        &app,
+        "set_note_pinned",
+        json!({ "folder": "Notes", "path": path, "pinned": true }),
+    );
+    let listed = ok(&app, "list_notes", json!({ "folder": "Notes" }));
+    assert_eq!(listed[0]["pinned"], json!(true));
+
+    let renamed = ok(
+        &app,
+        "rename_note",
+        json!({ "folder": "Notes", "path": path, "title": "Ideia boa" }),
+    );
+    let renamed = renamed.as_str().unwrap().to_string();
+    assert_eq!(renamed, "Inbox/Ideia boa.md");
+
+    ok(
+        &app,
+        "create_note_folder",
+        json!({ "folder": "Notes", "path": "Clientes/Riwer" }),
+    );
+    let moved = ok(
+        &app,
+        "move_note",
+        json!({ "folder": "Notes", "path": renamed, "toFolder": "Clientes/Riwer" }),
+    );
+    assert_eq!(moved, "Clientes/Riwer/Ideia boa.md");
+    assert!(dir.path().join("Notes/Clientes/Riwer/Ideia boa.md").is_file());
+
+    let folders = ok(&app, "note_folders", json!({ "folder": "Notes" }));
+    let folders: Vec<&str> = folders.as_array().unwrap().iter().map(|f| f.as_str().unwrap()).collect();
+    assert!(folders.contains(&"Inbox"));
+    assert!(folders.contains(&"Clientes/Riwer"));
+}
+
+#[test]
+fn a_note_address_that_escapes_is_refused_by_the_bridge() {
+    let (_lock, app, _dir) = app_with_notebook();
+
+    let err = invoke(
+        &app,
+        "read_note",
+        json!({ "folder": "Notes", "path": "../../etc/passwd.md" }),
+    )
+    .unwrap_err();
+    assert_eq!(err["kind"], "invalidNotePath");
+
+    // And a widget that is not a notes widget cannot be addressed as one.
+    let err = invoke(&app, "list_notes", json!({ "folder": "Tasks" })).unwrap_err();
+    assert_eq!(err["kind"], "invalidNotePath");
+}

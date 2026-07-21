@@ -43,6 +43,33 @@ export const S = {
     "This widget's folder points outside the workspace, so it was not loaded.",
   widgetNoLists: "No lists in this widget yet.",
 
+  // Notes (phase 8)
+  notes: "Notes",
+  newNote: "+ new note",
+  newNoteTitle: "New note",
+  promptNewNote: "Title of the new note:",
+  promptRenameNote: (title) => `New title for "${title}":`,
+  promptNewNoteFolder: "Name of the new folder:",
+  newNoteFolder: "+ new folder",
+  confirmDeleteNote: (title) => `Delete "${title}"? This cannot be undone.`,
+  searchNotes: "Search notes…",
+  noNotes: "No notes yet.",
+  noNotesFound: "No notes match this search.",
+  allNotes: "All notes",
+  emptyNote: "Empty note",
+  pin: "pin",
+  unpin: "unpin",
+  pinned: "pinned",
+  deleteNote: "delete",
+  renameNote: "rename",
+  moveNote: "move to…",
+  promptMoveNote: (folders) =>
+    `Move to which folder?\n\nAvailable: ${folders || "(root)"}`,
+  backToNotes: "← notes",
+  noteBodyPlaceholder: "Write here…",
+  gridView: "grid",
+  treeView: "folders",
+
   // Lists
   newTaskPlaceholder: "New task…",
   addTask: "Add",

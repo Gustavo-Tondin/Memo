@@ -8,13 +8,14 @@
 // A kind missing from the table falls back to the "unsupported" card: the
 // widget is shown, named, and its folder is left untouched — a template
 // written for a future version must degrade politely, never break or erase.
-// (`notes` lands here too until phase 8 ships its component.)
 
 import TasksWidget from "./TasksWidget.svelte";
+import NotesWidget from "./NotesWidget.svelte";
 import UnsupportedWidget from "./UnsupportedWidget.svelte";
 
 const REGISTRY = {
   tasks: TasksWidget,
+  notes: NotesWidget,
 };
 
 /// The component that renders `kind`, or the unsupported card.

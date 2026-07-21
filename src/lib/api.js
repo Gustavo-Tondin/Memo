@@ -41,6 +41,24 @@ export const api = {
   // `list` is the Completed list the task sits in — one per widget.
   uncompleteTask: (list, id) => invoke("uncomplete_task", { list, id }),
 
+  // notes
+  // `folder` is a notes widget's address ("Notes"); `path` is relative to it
+  // ("Inbox/ideia.md") — the widget owns its subtree.
+  listNotes: (folder, query) => invoke("list_notes", { folder, query }),
+  noteFolders: (folder) => invoke("note_folders", { folder }),
+  readNote: (folder, path) => invoke("read_note", { folder, path }),
+  writeNote: (folder, path, body) => invoke("write_note", { folder, path, body }),
+  createNote: (folder, inFolder, title) =>
+    invoke("create_note", { folder, inFolder, title }),
+  deleteNote: (folder, path) => invoke("delete_note", { folder, path }),
+  renameNote: (folder, path, title) =>
+    invoke("rename_note", { folder, path, title }),
+  moveNote: (folder, path, toFolder) =>
+    invoke("move_note", { folder, path, toFolder }),
+  setNotePinned: (folder, path, pinned) =>
+    invoke("set_note_pinned", { folder, path, pinned }),
+  createNoteFolder: (folder, path) => invoke("create_note_folder", { folder, path }),
+
   // day and week
   periodTasks: (period) => invoke("period_tasks", { period }),
   periodSuggestions: (period) => invoke("period_suggestions", { period }),

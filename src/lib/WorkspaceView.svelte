@@ -14,7 +14,12 @@
     lists = [],
     counts = {},
     completedName = "Completed",
+    notesInbox = "Inbox",
+    readOnly = false,
+    reloadKey = 0,
     onOpenList,
+    onChanged,
+    onError,
   } = $props();
 </script>
 
@@ -28,7 +33,18 @@
 {:else}
   {#each workspace.widgets as widget, i (i)}
     {@const Widget = widgetComponent(widget.kind)}
-    <Widget {widget} {lists} {counts} {completedName} {onOpenList} />
+    <Widget
+      {widget}
+      {lists}
+      {counts}
+      {completedName}
+      {notesInbox}
+      {readOnly}
+      {reloadKey}
+      {onOpenList}
+      {onChanged}
+      {onError}
+    />
   {/each}
 {/if}
 

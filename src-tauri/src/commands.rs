@@ -37,6 +37,9 @@ pub struct NotebookLayout {
     /// The per-folder completed list's NAME (`Completed`) — every tasks
     /// widget has one, and the UI must not hard-code it (the names.js lesson).
     pub completed_name: String,
+    /// The fixed Notes widget's folder, and the folder loose notes land in.
+    pub notes_folder: String,
+    pub notes_inbox: String,
 }
 
 /// What the frontend needs to know about the open notebook.
@@ -69,6 +72,8 @@ impl NotebookInfo {
                 completed: Notebook::completed_path_of(&Notebook::inbox_path())?,
                 tasks_folder: memo_core::TASKS_DIR.to_string(),
                 completed_name: memo_core::COMPLETED_LIST.to_string(),
+                notes_folder: memo_core::NOTES_DIR.to_string(),
+                notes_inbox: memo_core::notefolder::NOTES_INBOX.to_string(),
             },
         })
     }
@@ -509,6 +514,146 @@ pub fn uncomplete_task(
     id: String,
 ) -> CommandResult<Task> {
     state.with_notebook(|nb| Ok(nb.uncomplete_task(&list, &id)?))
+}
+
+// ------------------------------------------------------------------ notes
+//
+// `folder` is always the root-relative address of a notes widget (`Notes`);
+// `path` is always relative to that widget (`Inbox/ideia.md`). Two levels,
+// because the widget owns its subtree and the user organises freely inside
+// it.
+
+/// A note's content, for the editor.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteContent {
+    pub path: String,
+    pub title: String,
+    pub body: String,
+    pub pinned: bool,
+    pub created: Option<String>,
+}
+
+/// Every note in a notes widget, sorted for the board: pinned first, then
+/// newest. An empty `query` returns all of them.
+#[tauri::command]
+pub fn list_notes(
+    state: State<'_, AppState>,
+    folder: String,
+    query: Option<String>,
+) -> CommandResult<Vec<memo_core::NoteEntry>> {
+    state.with_notebook(|nb| {
+        let notes = nb.note_folder(&folder)?;
+        Ok(notes.search(query.as_deref().unwrap_or_default())?)
+    })
+}
+
+/// The folders inside a notes widget, for the tree view.
+#[tauri::command]
+pub fn note_folders(state: State<'_, AppState>, folder: String) -> CommandResult<Vec<String>> {
+    state.with_notebook(|nb| Ok(nb.note_folder(&folder)?.folders()?))
+}
+
+#[tauri::command]
+pub fn read_note(
+    state: State<'_, AppState>,
+    folder: String,
+    path: String,
+) -> CommandResult<NoteContent> {
+    state.with_notebook(|nb| {
+        let note = nb.note_folder(&folder)?.read(&path)?;
+        Ok(NoteContent {
+            title: path
+                .rsplit('/')
+                .next()
+                .unwrap_or(&path)
+                .trim_end_matches(".md")
+                .to_string(),
+            path,
+            body: note.body,
+            pinned: note.pinned,
+            created: note.created.map(|d| d.to_string()),
+        })
+    })
+}
+
+/// Replaces a note's body. The core adopts today as its creation date if it
+/// does not have one — the lazy frontmatter's one writing moment.
+#[tauri::command]
+pub fn write_note(
+    state: State<'_, AppState>,
+    folder: String,
+    path: String,
+    body: String,
+) -> CommandResult<()> {
+    state.with_notebook(|nb| {
+        let today = nb.today();
+        Ok(nb.note_folder(&folder)?.write(&path, &body, today)?)
+    })
+}
+
+/// Creates a note and returns its address.
+#[tauri::command]
+pub fn create_note(
+    state: State<'_, AppState>,
+    folder: String,
+    in_folder: String,
+    title: String,
+) -> CommandResult<String> {
+    state.with_notebook(|nb| {
+        let today = nb.today();
+        Ok(nb.note_folder(&folder)?.create(&in_folder, &title, today)?)
+    })
+}
+
+#[tauri::command]
+pub fn delete_note(
+    state: State<'_, AppState>,
+    folder: String,
+    path: String,
+) -> CommandResult<()> {
+    state.with_notebook(|nb| Ok(nb.note_folder(&folder)?.delete(&path)?))
+}
+
+/// Renames a note inside its folder. Returns the new address.
+#[tauri::command]
+pub fn rename_note(
+    state: State<'_, AppState>,
+    folder: String,
+    path: String,
+    title: String,
+) -> CommandResult<String> {
+    state.with_notebook(|nb| Ok(nb.note_folder(&folder)?.rename(&path, &title)?))
+}
+
+/// Moves a note to another folder inside the widget. Returns the new address.
+#[tauri::command]
+pub fn move_note(
+    state: State<'_, AppState>,
+    folder: String,
+    path: String,
+    to_folder: String,
+) -> CommandResult<String> {
+    state.with_notebook(|nb| Ok(nb.note_folder(&folder)?.move_to(&path, &to_folder)?))
+}
+
+#[tauri::command]
+pub fn set_note_pinned(
+    state: State<'_, AppState>,
+    folder: String,
+    path: String,
+    pinned: bool,
+) -> CommandResult<()> {
+    state.with_notebook(|nb| Ok(nb.note_folder(&folder)?.set_pinned(&path, pinned)?))
+}
+
+#[tauri::command]
+pub fn create_note_folder(
+    state: State<'_, AppState>,
+    folder: String,
+    path: String,
+) -> CommandResult<()> {
+    state.with_notebook(|nb| Ok(nb.note_folder(&folder)?.create_folder(&path)?))
 }
 
 // --------------------------------------------------------- day and week

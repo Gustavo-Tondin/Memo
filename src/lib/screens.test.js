@@ -20,6 +20,8 @@ const { default: CompletedView } = await import("./CompletedView.svelte");
 const { default: TaskInspector } = await import("./TaskInspector.svelte");
 const { default: App } = await import("../App.svelte");
 const { default: WorkspaceView } = await import("./WorkspaceView.svelte");
+const { default: NotesWidget } = await import("./NotesWidget.svelte");
+const { default: NoteEditor } = await import("./NoteEditor.svelte");
 
 const task = (id, text, extra = {}) => ({
   id,
@@ -712,6 +714,9 @@ describe("App", () => {
       inbox: "Tasks/Inbox.md",
       completed: "Tasks/Completed.md",
       tasksFolder: "Tasks",
+      completedName: "Completed",
+      notesFolder: "Notes",
+      notesInbox: "Inbox",
     },
   };
 
@@ -912,6 +917,8 @@ describe("App with a user workspace", () => {
       completed: "Tasks/Completed.md",
       tasksFolder: "Tasks",
       completedName: "Completed",
+      notesFolder: "Notes",
+      notesInbox: "Inbox",
     },
   };
 
@@ -976,5 +983,209 @@ describe("App with a user workspace", () => {
         list: "Project A/Backlog/Sprint.md",
       }),
     );
+  });
+});
+
+describe("NotesWidget", () => {
+  const widget = { kind: "notes", folder: "Notes", invalidFolder: false, options: null };
+
+  const entry = (title, extra = {}) => ({
+    path: `Inbox/${title}.md`,
+    title,
+    folder: "Inbox",
+    preview: `preview of ${title}`,
+    created: "2026-07-21",
+    pinned: false,
+    ...extra,
+  });
+
+  const props = (extra = {}) => ({
+    widget,
+    readOnly: false,
+    notesInbox: "Inbox",
+    onChanged: noop,
+    onError: noop,
+    reloadKey: 0,
+    ...extra,
+  });
+
+  test("lists the notes of its own folder", async () => {
+    bridge({ list_notes: [entry("Ideia")], note_folders: ["Inbox"] });
+
+    render(NotesWidget, { props: props() });
+
+    expect(await screen.findByText("Ideia")).toBeTruthy();
+    expect(screen.getByText("preview of Ideia")).toBeTruthy();
+    expect(invoke).toHaveBeenCalledWith("list_notes", {
+      folder: "Notes",
+      query: "",
+    });
+  });
+
+  test("typing in the search box asks the core, not the browser", async () => {
+    // Search is a core capability (it reads the files); the screen must not
+    // filter a list it happens to have in memory.
+    bridge({ list_notes: [], note_folders: [] });
+
+    render(NotesWidget, { props: props() });
+    await userEvent.type(await screen.findByLabelText("Search notes…"), "cimento");
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("list_notes", {
+        folder: "Notes",
+        query: "cimento",
+      }),
+    );
+  });
+
+  test("an empty search says so differently from an empty notebook", async () => {
+    bridge({ list_notes: [], note_folders: [] });
+
+    render(NotesWidget, { props: props() });
+    expect(await screen.findByText("No notes yet.")).toBeTruthy();
+
+    await userEvent.type(screen.getByLabelText("Search notes…"), "nada");
+    expect(await screen.findByText("No notes match this search.")).toBeTruthy();
+  });
+
+  test("pinning goes through the core and reloads", async () => {
+    bridge({ list_notes: [entry("Ideia")], note_folders: [], set_note_pinned: null });
+
+    render(NotesWidget, { props: props() });
+    await userEvent.click(await screen.findByLabelText("pin"));
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("set_note_pinned", {
+        folder: "Notes",
+        path: "Inbox/Ideia.md",
+        pinned: true,
+      }),
+    );
+  });
+
+  test("opening a note hands over to the editor", async () => {
+    bridge({
+      list_notes: [entry("Ideia")],
+      note_folders: [],
+      read_note: {
+        path: "Inbox/Ideia.md",
+        title: "Ideia",
+        body: "Corpo da nota.\n",
+        pinned: false,
+        created: "2026-07-21",
+      },
+    });
+
+    render(NotesWidget, { props: props() });
+    await userEvent.click(await screen.findByText("Ideia"));
+
+    expect(await screen.findByDisplayValue("Corpo da nota.")).toBeTruthy();
+    expect(invoke).toHaveBeenCalledWith("read_note", {
+      folder: "Notes",
+      path: "Inbox/Ideia.md",
+    });
+  });
+
+  test("the folder view filters to the folder being looked at", async () => {
+    bridge({
+      list_notes: [
+        entry("Solta"),
+        entry("Briefing", { path: "Clientes/Briefing.md", folder: "Clientes" }),
+      ],
+      note_folders: ["Clientes", "Inbox"],
+    });
+
+    render(NotesWidget, { props: props() });
+    await userEvent.click(await screen.findByText("folders"));
+    // The folder chip, not the card footer that also names the folder.
+    await userEvent.click(screen.getByRole("button", { name: "Clientes" }));
+
+    expect(await screen.findByText("Briefing")).toBeTruthy();
+    expect(screen.queryByText("Solta")).toBeNull();
+  });
+
+  test("a read-only notebook offers no way to write", async () => {
+    bridge({ list_notes: [entry("Ideia")], note_folders: [] });
+
+    render(NotesWidget, { props: props({ readOnly: true }) });
+
+    await screen.findByText("Ideia");
+    expect(screen.queryByText("+ new note")).toBeNull();
+    expect(screen.queryByLabelText("pin")).toBeNull();
+  });
+});
+
+describe("NoteEditor", () => {
+  const props = (extra = {}) => ({
+    folder: "Notes",
+    path: "Inbox/Ideia.md",
+    readOnly: false,
+    saveDelay: 0,
+    onSaved: noop,
+    onError: noop,
+    onClose: noop,
+    onRenamed: noop,
+    ...extra,
+  });
+
+  const loaded = (body = "Corpo.\n") => ({
+    read_note: {
+      path: "Inbox/Ideia.md",
+      title: "Ideia",
+      body,
+      pinned: false,
+      created: "2026-07-21",
+    },
+    write_note: null,
+  });
+
+  test("opening a note writes nothing", async () => {
+    // Same promise as the lazy task id: looking must not touch the file.
+    bridge(loaded());
+
+    render(NoteEditor, { props: props() });
+    await screen.findByDisplayValue("Corpo.");
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(invoke.mock.calls.some(([cmd]) => cmd === "write_note")).toBe(false);
+  });
+
+  test("editing saves on its own", async () => {
+    bridge(loaded());
+
+    render(NoteEditor, { props: props() });
+    await userEvent.type(await screen.findByDisplayValue("Corpo."), " Mais.");
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("write_note", {
+        folder: "Notes",
+        path: "Inbox/Ideia.md",
+        body: "Corpo.\n Mais.",
+      }),
+    );
+  });
+
+  test("closing with an edit pending still saves it", async () => {
+    bridge(loaded());
+
+    const { unmount } = render(NoteEditor, {
+      props: props({ saveDelay: 10_000 }),
+    });
+    await userEvent.type(await screen.findByDisplayValue("Corpo."), "!");
+    unmount();
+
+    await waitFor(() =>
+      expect(invoke.mock.calls.some(([cmd]) => cmd === "write_note")).toBe(true),
+    );
+  });
+
+  test("a read-only notebook cannot be edited", async () => {
+    bridge(loaded());
+
+    render(NoteEditor, { props: props({ readOnly: true }) });
+
+    const field = await screen.findByDisplayValue("Corpo.");
+    expect(field.disabled).toBe(true);
+    expect(screen.queryByText("delete")).toBeNull();
   });
 });

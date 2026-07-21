@@ -8,6 +8,7 @@
   import CompletedView from "./lib/CompletedView.svelte";
   import TaskInspector from "./lib/TaskInspector.svelte";
   import WorkspaceView from "./lib/WorkspaceView.svelte";
+  import NotesWidget from "./lib/NotesWidget.svelte";
   import { listName } from "./lib/paths.js";
   import { S } from "./lib/strings.js";
 
@@ -47,6 +48,7 @@
     if (v.kind === "period") return v.period;
     if (v.kind === "list") return `list:${v.list}`;
     if (v.kind === "workspace") return `ws:${v.ws}`;
+    if (v.kind === "notes") return "notes";
     return v.kind;
   }
 
@@ -56,6 +58,7 @@
     if (id === "completed") return { kind: "completed" };
     if (id.startsWith("list:")) return { kind: "list", list: id.slice(5) };
     if (id.startsWith("ws:")) return { kind: "workspace", ws: id.slice(3) };
+    if (id === "notes") return { kind: "notes" };
     return null;
   }
 
@@ -88,6 +91,9 @@
       inbox: "Tasks/Inbox.md",
       completed: "Tasks/Completed.md",
       tasksFolder: "Tasks",
+      completedName: "Completed",
+      notesFolder: "Notes",
+      notesInbox: "Inbox",
     },
   );
 
@@ -291,6 +297,10 @@
           onclick={() => (view = { kind: "period", period: "week" })}
           >{S.week}</button
         >
+        <button
+          class:active={view.kind === "notes"}
+          onclick={() => (view = { kind: "notes" })}>{S.notes}</button
+        >
 
         <hr />
         {#each userLists as entry (entry.path)}
@@ -382,6 +392,18 @@
               <button onclick={deleteCurrentList}>{S.deleteList}</button>
             </p>
           {/if}
+        {:else if view.kind === "notes"}
+          <!-- The fixed Notes workspace is one notes widget at its root; the
+               shell renders it directly instead of going through the generic
+               workspace runtime, the same way Today and the lists are direct. -->
+          <NotesWidget
+            widget={{ kind: "notes", folder: layout.notesFolder }}
+            readOnly={notebook.readOnly}
+            notesInbox={layout.notesInbox}
+            {reloadKey}
+            onChanged={refreshNotebook}
+            onError={fail}
+          />
         {:else if view.kind === "workspace"}
           {@const current = userWorkspaces.find((w) => w.folderName === view.ws)}
           {#if current}
@@ -390,7 +412,12 @@
               lists={notebook.lists}
               {counts}
               completedName={layout.completedName}
+              notesInbox={layout.notesInbox}
+              readOnly={notebook.readOnly}
+              {reloadKey}
               onOpenList={(path) => (view = { kind: "list", list: path })}
+              onChanged={refreshNotebook}
+              onError={fail}
             />
           {:else}
             <p class="empty-ws">{S.emptyWorkspace}</p>
