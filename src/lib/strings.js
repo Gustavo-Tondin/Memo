@@ -81,6 +81,12 @@ export const S = {
   inboxTab: "Inbox",
   openInNewTab: "open in new tab",
   closeTab: "close tab",
+  newTab: "new tab",
+
+  // Title bar window controls (frameless window)
+  minimizeWindow: "minimize",
+  maximizeWindow: "maximize",
+  closeWindow: "close window",
   goBack: "back",
   goForward: "forward",
   pageMenu: "page menu",

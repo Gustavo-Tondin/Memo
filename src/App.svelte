@@ -19,6 +19,7 @@
   import HomeView from "./lib/HomeView.svelte";
   import SettingsView from "./lib/SettingsView.svelte";
   import TabBar from "./lib/TabBar.svelte";
+  import TitleBar from "./lib/TitleBar.svelte";
   import PageHeader from "./lib/PageHeader.svelte";
   import { listName } from "./lib/paths.js";
   import { S } from "./lib/strings.js";
@@ -52,6 +53,14 @@
   /// Navigates the active tab, replacing what it shows.
   function goTo(next) {
     ({ tabs, active } = Tabs.navigate(tabs, active, next));
+  }
+
+  /// Opens a fresh tab. Unlike following a link (which focuses an already-open
+  /// document), the `+` is a deliberate "I want another tab" gesture, so it
+  /// always appends — duplicates are the intent here, not an accident.
+  function openNewTab() {
+    tabs = [...tabs, { views: [{ kind: "home" }], at: 0 }];
+    active = tabs.length - 1;
   }
 
   const closeTab = (i) => ({ tabs, active } = Tabs.close(tabs, active, i));
@@ -395,55 +404,83 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<main>
-  {#if !notebook}
-    <section class="onboarding">
-      <h1>Memo</h1>
-      <p>{S.onboardingIntro}</p>
-      <button onclick={chooseFolder} disabled={busy}>{S.chooseFolder}</button>
-      {#if error}<p class="error">{error}</p>{/if}
-    </section>
+<!-- The window is frameless: this bar draws the brand, the document tabs and
+     the min/max/close controls itself, and is the only handle to move or close
+     the window — so it renders even before a notebook is open. -->
+<div class="window">
+  <TitleBar>
+    {#if notebook}
+      <TabBar
+        {tabs}
+        {active}
+        {titleOf}
+        onSelect={(i) => (active = i)}
+        onClose={closeTab}
+        onOpenNew={openNewTab}
+        onMove={(from, to) =>
+          ({ tabs, active } = Tabs.move(tabs, active, from, to))}
+      />
+    {/if}
+  </TitleBar>
+
+  <main>
+    {#if !notebook}
+      <section class="shell__onboarding">
+        <h1 class="shell__onboarding-title">Memo</h1>
+        <p class="shell__onboarding-intro">{S.onboardingIntro}</p>
+        <button
+          class="shell__onboarding-action"
+          onclick={chooseFolder}
+          disabled={busy}>{S.chooseFolder}</button
+        >
+        {#if error}<p class="shell__error">{error}</p>{/if}
+      </section>
   {:else}
-    <div class="app" class:with-panel={selected}>
+    <div class="shell" class:shell--with-panel={selected}>
       <!-- LEFT: workspaces on top, notebook and settings pinned to the
            bottom, as the wireframe has them. -->
-      <nav>
-        <div class="nav-scroll">
+      <nav class="shell__sidebar">
+        <div class="shell__sidebar-scroll">
           <button
-            class:active={isOpen({ kind: "home" })}
+            class="shell__nav-item"
+            class:shell__nav-item--active={isOpen({ kind: "home" })}
             onclick={() => openTab({ kind: "home" })}>{S.home}</button
           >
           <button
-            class:active={isOpen({ kind: "tasks" })}
+            class="shell__nav-item"
+            class:shell__nav-item--active={isOpen({ kind: "tasks" })}
             onclick={() => openTab({ kind: "tasks" })}>{S.tasks}</button
           >
           <button
-            class:active={isOpen({ kind: "notes" })}
+            class="shell__nav-item"
+            class:shell__nav-item--active={isOpen({ kind: "notes" })}
             onclick={() => openTab({ kind: "notes" })}>{S.notes}</button
           >
 
-          <hr />
+          <hr class="shell__divider" />
           {#each userLists as entry (entry.path)}
             <button
-              class:active={isOpen({ kind: "list", list: entry.path })}
+              class="shell__nav-item"
+              class:shell__nav-item--active={isOpen({ kind: "list", list: entry.path })}
               onclick={() => showList(entry.path)}
               onauxclick={(e) =>
                 e.button === 1 && (e.preventDefault(), showList(entry.path, true))}
               title={S.openInNewTab}
             >
               {entry.name}
-              {#if counts[entry.path]}<span class="count"
+              {#if counts[entry.path]}<span class="shell__count"
                   >{counts[entry.path]}</span
                 >{/if}
             </button>
           {/each}
 
           {#if userWorkspaces.length > 0}
-            <hr />
-            <small class="section">{S.workspacesTitle}</small>
+            <hr class="shell__divider" />
+            <small class="shell__group-title">{S.workspacesTitle}</small>
             {#each userWorkspaces as ws (ws.folderName)}
               <button
-                class:active={isOpen({ kind: "workspace", ws: ws.folderName })}
+                class="shell__nav-item"
+                class:shell__nav-item--active={isOpen({ kind: "workspace", ws: ws.folderName })}
                 onclick={() => openTab({ kind: "workspace", ws: ws.folderName })}
               >
                 {ws.name}
@@ -451,46 +488,40 @@
             {/each}
           {/if}
 
-          <hr />
+          <hr class="shell__divider" />
           <button
-            class:active={isOpen({ kind: "completed" })}
+            class="shell__nav-item"
+            class:shell__nav-item--active={isOpen({ kind: "completed" })}
             onclick={() => openTab({ kind: "completed" })}>{S.completed}</button
           >
           {#if !notebook.readOnly}
-            <button class="secondary" onclick={createList}
-              >{S.newListButton}</button
+            <button
+              class="shell__nav-item shell__nav-item--secondary"
+              onclick={createList}>{S.newListButton}</button
             >
           {/if}
         </div>
 
-        <div class="nav-bottom">
+        <div class="shell__sidebar-footer">
           <button
-            class="secondary"
+            class="shell__nav-item shell__nav-item--secondary"
             title={notebook.path}
             onclick={chooseFolder}
           >
             {notebook.name}
-            {#if notebook.readOnly}<span class="ro">{S.readOnly}</span>{/if}
+            {#if notebook.readOnly}<span class="shell__badge">{S.readOnly}</span>{/if}
           </button>
           <button
-            class="secondary"
-            class:active={isOpen({ kind: "settings" })}
+            class="shell__nav-item shell__nav-item--secondary"
+            class:shell__nav-item--active={isOpen({ kind: "settings" })}
             onclick={() => openTab({ kind: "settings" })}>{S.settings}</button
           >
         </div>
       </nav>
 
-      <!-- CENTRE: tabs, page header, then the screen itself. -->
-      <section class="centre">
-        <TabBar
-          {tabs}
-          {active}
-          {titleOf}
-          onSelect={(i) => (active = i)}
-          onClose={closeTab}
-          onMove={(from, to) =>
-            ({ tabs, active } = Tabs.move(tabs, active, from, to))}
-        />
+      <!-- CENTRE: page header, then the screen itself. The tabs moved up into
+           the title bar; the header keeps the back/forward, title and ••• menu. -->
+      <section class="shell__centre">
         <PageHeader
           title={titleOf(view)}
           subtitle={view.kind === "home" ? (clock?.today ?? "") : ""}
@@ -506,9 +537,9 @@
 
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <!-- svelte-ignore a11y_click_events_have_key_events -->
-        <div class="content" onclick={clickedAway}>
+        <div class="shell__content" onclick={clickedAway}>
           {#if error}
-            <p class="error">
+            <p class="shell__error">
               {error}
               <button onclick={() => (error = null)}>{S.dismissError}</button>
             </p>
@@ -517,14 +548,16 @@
           {#if conflicts.length > 0}
             <!-- The one case where the user can silently lose work: two
                  devices edited the same file and the sync tool kept both. -->
-            <div class="conflict">
-              <strong>{S.conflictsTitle(conflicts.length)}</strong>
+            <div class="shell__conflict">
+              <strong class="shell__conflict-title"
+                >{S.conflictsTitle(conflicts.length)}</strong
+              >
               <p>{S.conflictsBody}</p>
-              <ul>
+              <ul class="shell__conflict-list">
                 {#each conflicts as conflict}
                   <li>
                     {#if conflict.list}<strong>{conflict.list}</strong>{/if}
-                    <code>{conflict.path}</code>
+                    <code class="shell__conflict-path">{conflict.path}</code>
                   </li>
                 {/each}
               </ul>
@@ -614,7 +647,7 @@
                 onError={fail}
               />
             {:else}
-              <p class="empty-ws">{S.emptyWorkspace}</p>
+              <p class="shell__empty">{S.emptyWorkspace}</p>
             {/if}
           {:else}
             <CompletedView
@@ -644,39 +677,56 @@
       {/if}
     </div>
   {/if}
-</main>
+  </main>
+</div>
 
 <style>
-  /* Structural only. The real design lands in phase 10, on top of a token
-     layer that has to exist first. */
-  main {
-    font-family: system-ui, sans-serif;
+  /* Phase 10: the shell adopts the token layer. Components are rebuilt in
+     later batches; this batch is the title bar + the window frame. */
+
+  /* The frameless window's own frame: the OS gives no rounding or shadow to an
+     undecorated window on GNOME/Wayland, so the app draws its own. `overflow:
+     hidden` clips the content to the rounded corners; the transparent page
+     behind (set in app.css) lets the corners show through. */
+  .window {
     height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--theme-bg);
+    border-radius: var(--theme-window-radius);
+    overflow: hidden;
+    box-shadow: var(--theme-window-shadow);
   }
-  .onboarding {
+  main {
+    flex: 1;
+    min-height: 0;
+    font-family: var(--theme-font-sans);
+  }
+  .shell__onboarding {
     max-width: 32rem;
     margin: 4rem auto;
     padding: 1rem;
   }
-  .app {
+  .shell {
     display: grid;
-    grid-template-columns: 14rem 1fr;
+    grid-template-columns: var(--theme-sidebar-left) 1fr;
     height: 100%;
     min-height: 0;
   }
   /* Driven by a class, not `:has(aside)`: the panel is a child component and
-     Svelte's scoped CSS would never match its element from here. */
-  .app.with-panel {
-    grid-template-columns: 14rem 1fr 20rem;
+     Svelte's scoped CSS would never match its element from here. The columns
+     match the title bar's grid, so the tab strip aligns with the centre panel. */
+  .shell--with-panel {
+    grid-template-columns: var(--theme-sidebar-left) 1fr var(--theme-sidebar-right);
   }
-  nav {
+  .shell__sidebar {
     display: flex;
     flex-direction: column;
     justify-content: space-between;
     border-right: 1px solid #ccc;
     min-height: 0;
   }
-  .nav-scroll {
+  .shell__sidebar-scroll {
     display: flex;
     flex-direction: column;
     align-items: stretch;
@@ -684,11 +734,11 @@
     padding: 0.75rem;
     overflow-y: auto;
   }
-  .nav-bottom {
+  .shell__sidebar-footer {
     border-top: 1px solid #ddd;
     padding: 0.5rem 0.75rem;
   }
-  nav button {
+  .shell__nav-item {
     text-align: left;
     padding: 0.35rem 0.5rem;
     background: none;
@@ -697,42 +747,42 @@
     font: inherit;
     cursor: pointer;
   }
-  nav button:hover {
+  .shell__nav-item:hover {
     background: #eee;
   }
-  nav button.active {
+  .shell__nav-item--active {
     background: #ddd;
     font-weight: 600;
   }
-  nav button.secondary {
+  .shell__nav-item--secondary {
     color: #555;
     font-size: 0.85rem;
   }
-  .nav-bottom button {
+  .shell__sidebar-footer .shell__nav-item {
     width: 100%;
   }
-  .ro {
+  .shell__badge {
     display: block;
     color: #b00;
     font-size: 0.8rem;
   }
-  .centre {
+  .shell__centre {
     display: flex;
     flex-direction: column;
     min-height: 0;
   }
-  .content {
+  .shell__content {
     flex: 1;
     padding: 1rem;
     overflow-y: auto;
   }
-  .error {
+  .shell__error {
     background: #fee;
     border: 1px solid #f99;
     padding: 0.5rem;
     border-radius: 4px;
   }
-  .conflict {
+  .shell__conflict {
     background: #fff8e1;
     border: 1px solid #e6c34a;
     padding: 0.5rem 0.75rem;
@@ -740,31 +790,31 @@
     margin-bottom: 1rem;
     font-size: 0.9rem;
   }
-  .conflict ul {
+  .shell__conflict-list {
     margin: 0.5rem 0 0;
     padding-left: 1.2rem;
   }
-  .conflict code {
+  .shell__conflict-path {
     word-break: break-all;
     font-size: 0.8rem;
   }
-  .count {
+  .shell__count {
     float: right;
     color: #666;
     font-size: 0.85rem;
     font-weight: normal;
   }
-  .section {
+  .shell__group-title {
     color: #888;
     font-size: 0.7rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     padding: 0.25rem 0.5rem 0;
   }
-  .empty-ws {
+  .shell__empty {
     color: #666;
   }
-  hr {
+  .shell__divider {
     border: none;
     border-top: 1px solid #ddd;
     width: 100%;

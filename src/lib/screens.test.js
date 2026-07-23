@@ -18,6 +18,15 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args) => invoke(...args) })
 // live-preview rule is tested on its own in `markdown.test.js`.
 vi.mock("./Editor.svelte", async () => await import("./EditorStub.svelte"));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
+// The title bar drives the frameless window through this API; jsdom has no
+// real window to minimize/maximize/close, so the handle is stubbed.
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => ({
+    minimize: vi.fn(),
+    toggleMaximize: vi.fn(),
+    close: vi.fn(),
+  }),
+}));
 
 const { default: ListView } = await import("./ListView.svelte");
 const { default: PeriodView } = await import("./PeriodView.svelte");
@@ -816,7 +825,7 @@ describe("App", () => {
     await openTask("Comprar leite");
 
     await userEvent.click(screen.getByPlaceholderText("New task…"));
-    await fireEvent.click(container.querySelector(".content"));
+    await fireEvent.click(container.querySelector(".shell__content"));
 
     expect(screen.queryByLabelText("task name")).not.toBeNull();
   });
@@ -1469,6 +1478,18 @@ describe("App shell with tabs", () => {
     await waitFor(() => expect(tabLabels()).toEqual(["Compras"]));
   });
 
+  test("the plus opens a fresh tab", async () => {
+    // The + is a deliberate "new tab" gesture, so it appends even when the
+    // view is already open — unlike following a link, which focuses.
+    shell();
+    render(App);
+    await waitFor(() => expect(tabLabels()).toEqual(["Home"]));
+
+    await userEvent.click(screen.getByLabelText("new tab"));
+    await waitFor(() => expect(tabLabels()).toEqual(["Home", "Home"]));
+    expect(screen.getAllByRole("tab")[1].getAttribute("aria-selected")).toBe("true");
+  });
+
   test("middle click opens a document in a new tab", async () => {
     shell();
     render(App);
@@ -1629,12 +1650,12 @@ describe("TabBar", () => {
     await userEvent.click(screen.getAllByLabelText("close tab")[1]);
 
     expect(closed).toEqual([1]);
-    const widths = [...container.querySelectorAll(".tab")].map((el) => el.style.width);
+    const widths = [...container.querySelectorAll(".tabs__item")].map((el) => el.style.width);
     expect(widths.every((w) => w !== "")).toBe(true);
 
     // Leaving the bar releases them, so the tabs breathe again.
-    await fireEvent.mouseLeave(container.querySelector(".tabbar-outer"));
-    const after = [...container.querySelectorAll(".tab")].map((el) => el.style.width);
+    await fireEvent.mouseLeave(container.querySelector(".tabs"));
+    const after = [...container.querySelectorAll(".tabs__item")].map((el) => el.style.width);
     expect(after.every((w) => w === "")).toBe(true);
   });
 
@@ -1643,12 +1664,30 @@ describe("TabBar", () => {
     render(TabBar, { props: props({ onClose: (i) => closed.push(i) }) });
 
     await fireEvent(
-      screen.getAllByRole("tab")[2].closest(".tab"),
+      screen.getAllByRole("tab")[2].closest(".tabs__item"),
       new MouseEvent("auxclick", { button: 1, bubbles: true, cancelable: true }),
     );
 
     expect(closed).toEqual([2]);
   });
+
+  // Reordering is pointer-based (no native drag), so jsdom has no layout to
+  // offer — each tab is given a fake 100px-wide rect side by side, and the
+  // pointer is moved to the slot to land in.
+  const layOut = (els) =>
+    [...els].forEach((el, i) => {
+      el.getBoundingClientRect = () => ({
+        left: i * 100,
+        right: i * 100 + 100,
+        width: 100,
+        top: 0,
+        bottom: 28,
+        height: 28,
+        x: i * 100,
+        y: 0,
+        toJSON() {},
+      });
+    });
 
   test("dragging a tab onto another reports the move", async () => {
     const moves = [];
@@ -1656,22 +1695,28 @@ describe("TabBar", () => {
       props: props({ onMove: (from, to) => moves.push([from, to]) }),
     });
 
-    const els = container.querySelectorAll(".tab");
-    await fireEvent.dragStart(els[0]);
-    await fireEvent.drop(els[2]);
+    const els = container.querySelectorAll(".tabs__item");
+    layOut(els);
+    // Grab the first tab and carry it past the third's midpoint.
+    await fireEvent.pointerDown(els[0], { button: 0, pointerId: 1, clientX: 10 });
+    await fireEvent.pointerMove(els[0], { pointerId: 1, clientX: 260 });
+    await fireEvent.pointerUp(els[0], { pointerId: 1, clientX: 260 });
 
     expect(moves).toEqual([[0, 2]]);
   });
 
-  test("a tab dropped on itself moves nothing", async () => {
+  test("a tab released on itself moves nothing", async () => {
     const moves = [];
     const { container } = render(TabBar, {
       props: props({ onMove: (from, to) => moves.push([from, to]) }),
     });
 
-    const els = container.querySelectorAll(".tab");
-    await fireEvent.dragStart(els[1]);
-    await fireEvent.drop(els[1]);
+    const els = container.querySelectorAll(".tabs__item");
+    layOut(els);
+    // Past the 5px threshold, but still over its own slot.
+    await fireEvent.pointerDown(els[1], { button: 0, pointerId: 1, clientX: 110 });
+    await fireEvent.pointerMove(els[1], { pointerId: 1, clientX: 130 });
+    await fireEvent.pointerUp(els[1], { pointerId: 1, clientX: 130 });
 
     expect(moves).toEqual([]);
   });
