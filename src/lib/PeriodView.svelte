@@ -95,19 +95,25 @@
   );
 </script>
 
-<h2>{title} <small>{subtitle}</small></h2>
+<h2 class="period-view__heading">
+  {title} <small class="period-view__subtitle">{subtitle}</small>
+</h2>
 
 {#if !readOnly}
-  <form onsubmit={(e) => (e.preventDefault(), add())}>
-    <input placeholder={S.newTaskToInboxPlaceholder} bind:value={newText} />
-    <button type="submit">{S.addTask}</button>
+  <form class="period-view__form" onsubmit={(e) => (e.preventDefault(), add())}>
+    <input
+      class="period-view__input"
+      placeholder={S.newTaskToInboxPlaceholder}
+      bind:value={newText}
+    />
+    <button class="period-view__submit" type="submit">{S.addTask}</button>
   </form>
 {/if}
 
 {#if pulled.length === 0}
-  <p class="empty">{S.nothingPulled}</p>
+  <p class="period-view__empty">{S.nothingPulled}</p>
 {:else}
-  <ul>
+  <ul class="period-view__list">
     {#each pulled as entry, i (`${entry.path}/${entry.task.id ?? ""}#${i}`)}
       <TaskRow
         task={entry.task}
@@ -119,31 +125,44 @@
         onEdit={edit}
         {dateFormat}
       >
-        <button onclick={() => remove(entry.path, entry.task.id)}>{S.removeFromPeriod}</button>
+        <button
+          class="period-view__action"
+          onclick={() => remove(entry.path, entry.task.id)}
+          >{S.removeFromPeriod}</button
+        >
       </TaskRow>
     {/each}
   </ul>
 {/if}
 
-<h3>{S.suggestionsTitle}</h3>
+<h3 class="period-view__suggestions-title">{S.suggestionsTitle}</h3>
 {#if suggestions.length === 0}
-  <p class="empty">{S.noSuggestions}</p>
+  <p class="period-view__empty">{S.noSuggestions}</p>
 {:else}
   {#each groups as group}
     {#if group.items.length > 0}
-      <details open={group.key !== "lists"}>
-        <summary>{group.label} ({group.items.length})</summary>
-        <ul>
+      <details class="period-view__group" open={group.key !== "lists"}>
+        <summary class="period-view__group-summary"
+          >{group.label} ({group.items.length})</summary
+        >
+        <ul class="period-view__list">
           {#each group.items as entry, i (`${entry.path}/${entry.task.id ?? ""}#${i}`)}
-            <li>
+            <li class="period-view__suggestion">
               <button
-                class="text"
+                class="period-view__suggestion-text"
                 onclick={() => onSelect?.(entry.path, entry.task)}
                 title="clique para abrir">{entry.task.text}</button
               >
-              {#if entry.task.due}<small class="due">{entry.task.due}</small>{/if}
-              <small class="from">{listName(entry.path)}</small>
-              <button onclick={() => pull(entry.path, entry.task)}>{S.pull}</button>
+              {#if entry.task.due}<small class="period-view__suggestion-due"
+                  >{entry.task.due}</small
+                >{/if}
+              <small class="period-view__suggestion-from"
+                >{listName(entry.path)}</small
+              >
+              <button
+                class="period-view__action"
+                onclick={() => pull(entry.path, entry.task)}>{S.pull}</button
+              >
             </li>
           {/each}
         </ul>
@@ -153,20 +172,22 @@
 {/if}
 
 <style>
-  ul {
+  .period-view__list {
     list-style: none;
     padding: 0;
   }
-  li {
+  .period-view__suggestion {
     display: flex;
     align-items: center;
     gap: 0.5rem;
     padding: 0.15rem 0;
   }
-  small {
+  .period-view__subtitle,
+  .period-view__suggestion-due,
+  .period-view__suggestion-from {
     color: #666;
   }
-  .text {
+  .period-view__suggestion-text {
     background: none;
     border: none;
     padding: 0;
@@ -174,15 +195,15 @@
     text-align: left;
     cursor: pointer;
   }
-  .empty {
+  .period-view__empty {
     color: #666;
   }
-  form {
+  .period-view__form {
     display: flex;
     gap: 0.5rem;
     margin-bottom: 0.5rem;
   }
-  form input {
+  .period-view__input {
     flex: 1;
   }
 </style>

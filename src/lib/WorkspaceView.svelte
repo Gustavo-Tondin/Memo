@@ -24,13 +24,15 @@
   } = $props();
 </script>
 
-<h2>
+<h2 class="workspace-view__title">
   {workspace.name}
-  {#if workspace.readOnly}<small class="ro">{S.readOnlyWorkspace}</small>{/if}
+  {#if workspace.readOnly}<small class="workspace-view__badge"
+      >{S.readOnlyWorkspace}</small
+    >{/if}
 </h2>
 
 {#if workspace.widgets.length === 0}
-  <p class="empty">{S.emptyWorkspace}</p>
+  <p class="workspace-view__empty">{S.emptyWorkspace}</p>
 {:else}
   {#each workspace.widgets as widget, i (i)}
     {@const Widget = widgetComponent(widget.kind)}
@@ -51,13 +53,13 @@
 {/if}
 
 <style>
-  .ro {
+  .workspace-view__badge {
     color: #b00;
     font-weight: normal;
     font-size: 0.8rem;
     margin-left: 0.5rem;
   }
-  .empty {
+  .workspace-view__empty {
     color: #666;
   }
 </style>

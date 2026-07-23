@@ -68,14 +68,14 @@
 
 {#if settings && form}
   {#if readOnly}
-    <p class="notice">{S.readOnlyNotice}</p>
+    <p class="settings__notice">{S.readOnlyNotice}</p>
   {/if}
 
-  <section>
-    <h2>{S.sectionDay}</h2>
+  <section class="settings__section">
+    <h2 class="settings__section-title">{S.sectionDay}</h2>
 
-    <label class="row">
-      <span>{S.rolloverDaily}</span>
+    <label class="settings__row">
+      <span class="settings__label">{S.rolloverDaily}</span>
       <input
         bind:value={form.dailyAt}
         disabled={readOnly}
@@ -83,10 +83,10 @@
         onchange={(e) => put({ dailyAt: e.currentTarget.value })}
       />
     </label>
-    <p class="hint">{S.rolloverAtHint}</p>
+    <p class="settings__hint">{S.rolloverAtHint}</p>
 
-    <label class="row">
-      <span>{S.rolloverMode}</span>
+    <label class="settings__row">
+      <span class="settings__label">{S.rolloverMode}</span>
       <select
         bind:value={form.dailyMode}
         disabled={readOnly}
@@ -98,8 +98,8 @@
       </select>
     </label>
 
-    <label class="row">
-      <span>{S.rolloverWeekly}</span>
+    <label class="settings__row">
+      <span class="settings__label">{S.rolloverWeekly}</span>
       <input
         bind:value={form.weeklyAt}
         disabled={readOnly}
@@ -108,8 +108,8 @@
       />
     </label>
 
-    <label class="row">
-      <span>{S.rolloverMode}</span>
+    <label class="settings__row">
+      <span class="settings__label">{S.rolloverMode}</span>
       <select
         bind:value={form.weeklyMode}
         disabled={readOnly}
@@ -121,8 +121,8 @@
       </select>
     </label>
 
-    <label class="row">
-      <span>{S.weekStartsOn}</span>
+    <label class="settings__row">
+      <span class="settings__label">{S.weekStartsOn}</span>
       <select
         bind:value={form.weekStartsOn}
         disabled={readOnly}
@@ -135,11 +135,11 @@
     </label>
   </section>
 
-  <section>
-    <h2>{S.sectionDisplay}</h2>
+  <section class="settings__section">
+    <h2 class="settings__section-title">{S.sectionDisplay}</h2>
 
-    <label class="row">
-      <span>{S.dateFormat}</span>
+    <label class="settings__row">
+      <span class="settings__label">{S.dateFormat}</span>
       <select
         bind:value={form.dateDisplayFormat}
         disabled={readOnly}
@@ -152,8 +152,8 @@
       </select>
     </label>
 
-    <label class="row">
-      <span>{S.showListCounts}</span>
+    <label class="settings__row">
+      <span class="settings__label">{S.showListCounts}</span>
       <input
         type="checkbox"
         bind:checked={form.showListCounts}
@@ -163,8 +163,8 @@
       />
     </label>
 
-    <label class="row">
-      <span>{S.restoreLastScreen}</span>
+    <label class="settings__row">
+      <span class="settings__label">{S.restoreLastScreen}</span>
       <input
         type="checkbox"
         bind:checked={form.restoreLastScreen}
@@ -173,10 +173,10 @@
         onchange={(e) => put({ restoreLastScreen: e.currentTarget.checked })}
       />
     </label>
-    <p class="hint">{S.restoreLastScreenHint}</p>
+    <p class="settings__hint">{S.restoreLastScreenHint}</p>
 
-    <label class="row">
-      <span>{S.autoUrgentByDate}</span>
+    <label class="settings__row">
+      <span class="settings__label">{S.autoUrgentByDate}</span>
       <input
         type="checkbox"
         bind:checked={form.autoUrgentByDate}
@@ -185,10 +185,10 @@
         onchange={(e) => put({ autoUrgentByDate: e.currentTarget.checked })}
       />
     </label>
-    <p class="hint">{S.autoUrgentByDateHint}</p>
+    <p class="settings__hint">{S.autoUrgentByDateHint}</p>
 
-    <label class="row">
-      <span>{S.closeOnClickAway}</span>
+    <label class="settings__row">
+      <span class="settings__label">{S.closeOnClickAway}</span>
       <input
         type="checkbox"
         bind:checked={form.closeInspectorOnClickAway}
@@ -198,10 +198,10 @@
           put({ closeInspectorOnClickAway: e.currentTarget.checked })}
       />
     </label>
-    <p class="hint">{S.closeOnClickAwayHint}</p>
+    <p class="settings__hint">{S.closeOnClickAwayHint}</p>
 
-    <label class="row">
-      <span>{S.quickNoteFolder}</span>
+    <label class="settings__row">
+      <span class="settings__label">{S.quickNoteFolder}</span>
       <select
         bind:value={form.quickNoteFolder}
         disabled={readOnly}
@@ -216,23 +216,23 @@
     </label>
   </section>
 
-  <section>
-    <h2>{S.sectionNotebook}</h2>
-    <p class="row">
-      <span>{S.notebookPath}</span>
-      <code>{notebook?.path}</code>
+  <section class="settings__section">
+    <h2 class="settings__section-title">{S.sectionNotebook}</h2>
+    <p class="settings__row">
+      <span class="settings__label">{S.notebookPath}</span>
+      <code class="settings__path">{notebook?.path}</code>
     </p>
   </section>
 
-  {#if saved}<p class="saved">{S.settingsSaved}</p>{/if}
+  {#if saved}<p class="settings__saved">{S.settingsSaved}</p>{/if}
 {/if}
 
 <style>
-  section {
+  .settings__section {
     margin-bottom: 1.5rem;
     max-width: 34rem;
   }
-  h2 {
+  .settings__section-title {
     font-size: 0.75rem;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -241,7 +241,7 @@
     border-bottom: 1px solid #eee;
     padding-bottom: 0.25rem;
   }
-  .row {
+  .settings__row {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -249,28 +249,28 @@
     padding: 0.3rem 0;
     margin: 0;
   }
-  .row input:not([type="checkbox"]),
-  .row select {
+  .settings__row input:not([type="checkbox"]),
+  .settings__row select {
     font: inherit;
     min-width: 12rem;
   }
-  .hint {
+  .settings__hint {
     margin: 0 0 0.6rem;
     font-size: 0.8rem;
     color: #888;
   }
-  code {
+  .settings__path {
     font-size: 0.85rem;
     color: #555;
     word-break: break-all;
   }
-  .notice {
+  .settings__notice {
     background: #fff8e1;
     border: 1px solid #e6c34a;
     padding: 0.5rem 0.75rem;
     border-radius: 4px;
   }
-  .saved {
+  .settings__saved {
     color: #2a7;
     font-size: 0.85rem;
   }

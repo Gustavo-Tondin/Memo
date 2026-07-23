@@ -56,11 +56,11 @@
       showList
     ),
   );
-
 </script>
 
-<li class:selected>
+<li class="task-row" class:task-row--selected={selected}>
   <input
+    class="task-row__checkbox"
     type="checkbox"
     checked={task.done}
     onchange={() => onComplete(list, task)}
@@ -70,7 +70,7 @@
   {#if editing}
     <!-- svelte-ignore a11y_autofocus -->
     <input
-      class="edit"
+      class="task-row__edit"
       bind:value={draft}
       onblur={save}
       onkeydown={onKey}
@@ -78,7 +78,7 @@
     />
   {:else}
     <button
-      class="text"
+      class="task-row__text"
       onclick={() => onSelect?.(list, task)}
       ondblclick={startEditing}
       title={S.taskRowHint}
@@ -95,34 +95,47 @@
      only thing being read most of the time. Phase 10 gives this a real look;
      the order here is already the one it should keep. -->
 {#if hasFields}
-  <li class="fields">
-    {#if task.due}<span class="due">{formatDate(task.due, dateFormat)}</span>{/if}
-    {#if task.repeat}<span class="repeat" title={S.repeatsHint}>↻</span>{/if}
-    {#if task.priority}<span class="prio">!{task.priority}</span>{/if}
+  <li class="task-row__fields">
+    {#if task.due}<span class="task-row__field task-row__field--due"
+        >{formatDate(task.due, dateFormat)}</span
+      >{/if}
+    {#if task.repeat}<span
+        class="task-row__field task-row__field--repeat"
+        title={S.repeatsHint}>↻</span
+      >{/if}
+    {#if task.priority}<span class="task-row__field task-row__field--priority"
+        >!{task.priority}</span
+      >{/if}
     {#if task.subtasks?.length}
-      <span class="sub">{doneSubtasks}/{task.subtasks.length}</span>
+      <span class="task-row__field task-row__field--subtasks"
+        >{doneSubtasks}/{task.subtasks.length}</span
+      >
     {/if}
-    {#each task.tags ?? [] as tag}<span class="tag">#{tag}</span>{/each}
-    {#if showList}<span class="list">{listName(list)}</span>{/if}
+    {#each task.tags ?? [] as tag}<span
+        class="task-row__field task-row__field--tag">#{tag}</span
+      >{/each}
+    {#if showList}<span class="task-row__field task-row__field--list"
+        >{listName(list)}</span
+      >{/if}
   </li>
 {/if}
 
 {#if task.description?.length}
-  <li class="description">{task.description.join(" ")}</li>
+  <li class="task-row__description">{task.description.join(" ")}</li>
 {/if}
 
 <style>
-  li {
+  .task-row {
     display: flex;
     align-items: center;
     gap: 0.5rem;
     padding: 0.15rem 0;
   }
-  li.selected {
+  .task-row--selected {
     background: #eef2ff;
     border-radius: 4px;
   }
-  .text {
+  .task-row__text {
     background: none;
     border: none;
     padding: 0;
@@ -131,28 +144,31 @@
     cursor: pointer;
     flex: 1;
   }
-  .edit {
+  .task-row__edit {
     flex: 1;
     font: inherit;
   }
   /* Quiet by default: same size, same colour, no chips. A field is a note
      about the task, not a competing headline. */
-  .fields {
+  .task-row__fields {
+    display: flex;
+    align-items: center;
     gap: 0.6rem;
     padding: 0 0 0.2rem 1.9rem;
     font-size: 0.78rem;
     color: #777;
   }
-  .fields span {
+  .task-row__field {
     white-space: nowrap;
   }
-  .prio {
+  .task-row__field--priority {
     color: #a00;
   }
-  .tag {
+  .task-row__field--tag {
     color: #24468a;
   }
-  .description {
+  .task-row__description {
+    display: flex;
     padding: 0 0 0.35rem 1.9rem;
     font-size: 0.85rem;
     color: #666;

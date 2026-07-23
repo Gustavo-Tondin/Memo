@@ -8,9 +8,9 @@
   let { widget } = $props();
 </script>
 
-<section class="unsupported">
+<section class="unsupported-widget">
   <strong>{S.unsupportedWidgetTitle(widget.kind)}</strong>
-  <p>
+  <p class="unsupported-widget__body">
     {#if widget.invalidFolder}
       {S.invalidWidgetFolder}
     {:else}
@@ -20,14 +20,14 @@
 </section>
 
 <style>
-  .unsupported {
+  .unsupported-widget {
     border: 1px dashed #bbb;
     border-radius: 6px;
     padding: 0.6rem 0.8rem;
     color: #666;
     font-size: 0.9rem;
   }
-  .unsupported p {
+  .unsupported-widget__body {
     margin: 0.25rem 0 0;
   }
 </style>

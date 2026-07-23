@@ -80,12 +80,12 @@
     });
 </script>
 
-<section class="card">
-  <h2>{S.todaysTasks}</h2>
+<section class="home__section">
+  <h2 class="home__section-title">{S.todaysTasks}</h2>
   {#if tasks.length === 0}
-    <p class="empty">{S.noTasksToday}</p>
+    <p class="home__empty">{S.noTasksToday}</p>
   {:else}
-    <ul>
+    <ul class="home__task-list">
       {#each tasks as entry, i (`${entry.path}/${entry.task.id ?? ""}#${i}`)}
         <TaskRow
           task={entry.task}
@@ -102,12 +102,13 @@
   {/if}
 </section>
 
-<section class="card">
-  <h2>{S.todaysNotes}</h2>
+<section class="home__section">
+  <h2 class="home__section-title">{S.todaysNotes}</h2>
 
   {#if !readOnly && notesFolder}
-    <form class="capture" onsubmit={(e) => (e.preventDefault(), save())}>
+    <form class="home__capture" onsubmit={(e) => (e.preventDefault(), save())}>
       <textarea
+        class="home__capture-input"
         rows="2"
         placeholder={S.quickNote}
         aria-label={S.quickNote}
@@ -121,9 +122,14 @@
           }
         }}
       ></textarea>
-      <label>
+      <label class="home__capture-label">
         {S.quickNoteTo}
-        <select value={captureTo} onchange={(e) => (chosenFolder = e.currentTarget.value)} aria-label={S.quickNoteTo}>
+        <select
+          class="home__capture-select"
+          value={captureTo}
+          onchange={(e) => (chosenFolder = e.currentTarget.value)}
+          aria-label={S.quickNoteTo}
+        >
           <option value={notesInbox}>{notesInbox}</option>
           {#each folders.filter((f) => f !== notesInbox) as name (name)}
             <option value={name}>{name}</option>
@@ -134,14 +140,14 @@
   {/if}
 
   {#if notes.length === 0}
-    <p class="empty">{S.noNotesToday}</p>
+    <p class="home__empty">{S.noNotesToday}</p>
   {:else}
-    <ul class="notes">
+    <ul class="home__notes">
       {#each notes as note (note.path)}
-        <li>
-          <button onclick={() => onOpenNote?.(note.path)}>
-            <strong>{note.title}</strong>
-            <span>{note.preview || S.emptyNote}</span>
+        <li class="home__note-item">
+          <button class="home__note" onclick={() => onOpenNote?.(note.path)}>
+            <strong class="home__note-title">{note.title}</strong>
+            <span class="home__note-preview">{note.preview || S.emptyNote}</span>
           </button>
         </li>
       {/each}
@@ -150,13 +156,13 @@
 </section>
 
 <style>
-  .card {
+  .home__section {
     border: 1px solid #ddd;
     border-radius: 8px;
     padding: 0.75rem 1rem 1rem;
     margin-bottom: 1rem;
   }
-  h2 {
+  .home__section-title {
     margin: 0 0 0.6rem;
     font-size: 0.75rem;
     letter-spacing: 0.08em;
@@ -164,23 +170,23 @@
     color: #666;
     text-align: center;
   }
-  ul {
+  .home__task-list {
     list-style: none;
     margin: 0;
     padding: 0;
   }
-  .capture {
+  .home__capture {
     display: flex;
     gap: 0.5rem;
     align-items: flex-end;
     margin-bottom: 0.75rem;
   }
-  .capture textarea {
+  .home__capture-input {
     flex: 1;
     font: inherit;
     resize: vertical;
   }
-  .capture label {
+  .home__capture-label {
     font-size: 0.8rem;
     color: #666;
     display: flex;
@@ -189,12 +195,15 @@
   }
   /* The note cards mirror the notes board, so the same thing looks the same
      in both places. */
-  .notes {
+  .home__notes {
+    list-style: none;
+    margin: 0;
+    padding: 0;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
     gap: 0.6rem;
   }
-  .notes button {
+  .home__note {
     display: flex;
     flex-direction: column;
     gap: 0.3rem;
@@ -207,13 +216,13 @@
     cursor: pointer;
     padding: 0.6rem 0.7rem;
   }
-  .notes span {
+  .home__note-preview {
     color: #555;
     font-size: 0.85rem;
     max-height: 4em;
     overflow: hidden;
   }
-  .empty {
+  .home__empty {
     color: #666;
     margin: 0;
   }

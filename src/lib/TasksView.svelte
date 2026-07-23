@@ -33,9 +33,13 @@
   let sub = $state("inbox");
 </script>
 
-<nav class="subs">
+<nav class="tasks-view">
   {#each SUBS as item (item.key)}
-    <button class:active={sub === item.key} onclick={() => (sub = item.key)}>
+    <button
+      class="tasks-view__sub"
+      class:tasks-view__sub--active={sub === item.key}
+      onclick={() => (sub = item.key)}
+    >
       {item.label}
     </button>
   {/each}
@@ -67,12 +71,12 @@
 {/if}
 
 <style>
-  .subs {
+  .tasks-view {
     display: flex;
     gap: 0.35rem;
     margin-bottom: 0.75rem;
   }
-  .subs button {
+  .tasks-view__sub {
     background: none;
     border: 1px solid #ddd;
     border-radius: 14px;
@@ -81,7 +85,7 @@
     font-size: 0.9rem;
     cursor: pointer;
   }
-  .subs button.active {
+  .tasks-view__sub--active {
     background: #eef2ff;
     border-color: #b9c6f5;
     font-weight: 600;

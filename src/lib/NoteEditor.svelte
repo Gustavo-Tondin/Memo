@@ -97,7 +97,7 @@
   export const flushPending = () => flush();
 </script>
 
-<div class="body" aria-label={S.noteBodyPlaceholder}>
+<div class="note-editor__body" aria-label={S.noteBodyPlaceholder}>
   <Editor
     value={body}
     readOnly={readOnly || loading}
@@ -107,7 +107,7 @@
 </div>
 
 <style>
-  .body {
+  .note-editor__body {
     min-height: 60vh;
   }
 </style>

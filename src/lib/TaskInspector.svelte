@@ -216,8 +216,8 @@
   }
 </script>
 
-<aside>
-  <header>
+<aside class="inspector">
+  <header class="inspector__header">
     <input
       type="checkbox"
       checked={task?.done ?? false}
@@ -226,72 +226,102 @@
       aria-label={S.complete}
     />
     <input
-      class="title"
+      class="inspector__name"
       bind:value={draft.text}
       disabled={readOnly}
       aria-label={S.taskName}
     />
-    <button class="close" onclick={() => onClose?.()} aria-label={S.closePanel}>×</button>
+    <button
+      class="inspector__close"
+      onclick={() => onClose?.()}
+      aria-label={S.closePanel}>×</button
+    >
   </header>
 
-  <section>
-    <h3>{S.subtasksTitle}</h3>
-    <ul>
+  <section class="inspector__section">
+    <h3 class="inspector__section-title">{S.subtasksTitle}</h3>
+    <ul class="inspector__subtasks">
       {#each draft.subtasks as subtask, i (i)}
-        <li>
+        <li class="inspector__subtask">
           <input
             type="checkbox"
             bind:checked={subtask.done}
             disabled={readOnly}
             aria-label={S.subtaskLabel(subtask.text)}
           />
-          <input bind:value={subtask.text} disabled={readOnly} />
+          <input
+            class="inspector__subtask-input"
+            bind:value={subtask.text}
+            disabled={readOnly}
+          />
           {#if !readOnly}
-            <button onclick={() => removeSubtask(i)} aria-label={S.removeSubtask}
-              >×</button
+            <button
+              class="inspector__remove"
+              onclick={() => removeSubtask(i)}
+              aria-label={S.removeSubtask}>×</button
             >
           {/if}
         </li>
       {/each}
     </ul>
     {#if !readOnly}
-      <form onsubmit={(e) => (e.preventDefault(), addSubtask())}>
-        <input placeholder={S.newSubtaskPlaceholder} bind:value={newSubtask} />
+      <form
+        class="inspector__add"
+        onsubmit={(e) => (e.preventDefault(), addSubtask())}
+      >
+        <input
+          class="inspector__add-input"
+          placeholder={S.newSubtaskPlaceholder}
+          bind:value={newSubtask}
+        />
       </form>
     {/if}
   </section>
 
-  <section>
-    <h3>{S.tagsTitle}</h3>
-    <div class="tags">
+  <section class="inspector__section">
+    <h3 class="inspector__section-title">{S.tagsTitle}</h3>
+    <div class="inspector__tags">
       {#each draft.tags as tag (tag)}
-        <span class="tag">
+        <span class="inspector__tag">
           #{tag}
           {#if !readOnly}
-            <button onclick={() => removeTag(tag)} aria-label={S.removeTag(tag)}
-              >×</button
+            <button
+              class="inspector__tag-remove"
+              onclick={() => removeTag(tag)}
+              aria-label={S.removeTag(tag)}>×</button
             >
           {/if}
         </span>
       {/each}
     </div>
     {#if !readOnly}
-      <form onsubmit={(e) => (e.preventDefault(), addTag())}>
-        <input placeholder={S.newTagPlaceholder} bind:value={newTag} />
+      <form
+        class="inspector__add"
+        onsubmit={(e) => (e.preventDefault(), addTag())}
+      >
+        <input
+          class="inspector__add-input"
+          placeholder={S.newTagPlaceholder}
+          bind:value={newTag}
+        />
       </form>
     {/if}
   </section>
 
-  <section>
-    <h3>{S.descriptionTitle}</h3>
-    <textarea bind:value={draft.description} disabled={readOnly} rows="4"
+  <section class="inspector__section">
+    <h3 class="inspector__section-title">{S.descriptionTitle}</h3>
+    <textarea
+      class="inspector__description"
+      bind:value={draft.description}
+      disabled={readOnly}
+      rows="4"
     ></textarea>
   </section>
 
-  <section class="fields">
-    <label>
+  <section class="inspector__section inspector__fields">
+    <label class="inspector__field">
       {S.dueDateLabel}
-      <span class="date">
+      <span class="inspector__date">
         <!-- `onchange`, not `bind:value`: a date field emits `input` for every
              half-typed value while the picker is open, so binding it would
              save an empty date between choosing the month and choosing the
@@ -304,14 +334,17 @@
           disabled={readOnly}
         />
         {#if !readOnly && draft.due}
-          <button onclick={clearDate} aria-label={S.clearDate} title={S.clearDateHint}
-            >×</button
+          <button
+            class="inspector__date-clear"
+            onclick={clearDate}
+            aria-label={S.clearDate}
+            title={S.clearDateHint}>×</button
           >
         {/if}
       </span>
     </label>
 
-    <label>
+    <label class="inspector__field">
       {S.priorityLabel}
       <select bind:value={draft.priority} disabled={readOnly}>
         <option value={0}>{S.priorityNone}</option>
@@ -321,10 +354,11 @@
       </select>
     </label>
 
-    <label>
+    <label class="inspector__field">
       {S.repeatLabel}
-      <span class="repeat">
+      <span class="inspector__repeat">
         <input
+          class="inspector__repeat-count"
           type="number"
           min="1"
           bind:value={draft.repeatEvery}
@@ -340,12 +374,11 @@
       </span>
     </label>
   </section>
-
 </aside>
 
 <style>
-  /* Structural only, like the rest of the app until phase 10. */
-  aside {
+  /* Structural only, like the rest of the app until the token rebuild. */
+  .inspector {
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
@@ -354,87 +387,87 @@
     overflow-y: auto;
     font-size: 0.9rem;
   }
-  header {
+  .inspector__header {
     display: flex;
     align-items: center;
     gap: 0.5rem;
   }
-  .title {
+  .inspector__name {
     flex: 1;
     font: inherit;
     font-weight: 600;
   }
-  .close {
+  .inspector__close {
     background: none;
     border: none;
     font-size: 1.1rem;
     cursor: pointer;
     color: #666;
   }
-  h3 {
+  .inspector__section-title {
     margin: 0 0 0.25rem;
     font-size: 0.75rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: #666;
   }
-  ul {
+  .inspector__subtasks {
     list-style: none;
     margin: 0;
     padding: 0;
   }
-  li {
+  .inspector__subtask {
     display: flex;
     align-items: center;
     gap: 0.35rem;
     padding: 0.1rem 0;
   }
-  li input:not([type]) {
+  .inspector__subtask-input {
     flex: 1;
     font: inherit;
   }
-  .tags {
+  .inspector__tags {
     display: flex;
     flex-wrap: wrap;
     gap: 0.25rem;
   }
-  .tag {
+  .inspector__tag {
     background: #e3ecff;
     color: #24468a;
     border-radius: 10px;
     padding: 0.05rem 0.4rem;
     font-size: 0.8rem;
   }
-  .tag button {
+  .inspector__tag-remove {
     background: none;
     border: none;
     cursor: pointer;
     color: inherit;
     padding: 0;
   }
-  textarea {
+  .inspector__description {
     width: 100%;
     font: inherit;
     resize: vertical;
   }
-  .fields {
+  .inspector__fields {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
   }
-  label {
+  .inspector__field {
     display: flex;
     justify-content: space-between;
     align-items: center;
     gap: 0.5rem;
   }
-  .date,
-  .repeat {
+  .inspector__date,
+  .inspector__repeat {
     display: flex;
     align-items: center;
     gap: 0.25rem;
   }
-  .date button {
+  .inspector__date-clear {
     background: none;
     border: none;
     cursor: pointer;
@@ -442,10 +475,10 @@
     font-size: 1rem;
     padding: 0 0.15rem;
   }
-  .repeat input {
+  .inspector__repeat-count {
     width: 3.5rem;
   }
-  form input {
+  .inspector__add-input {
     width: 100%;
   }
 </style>

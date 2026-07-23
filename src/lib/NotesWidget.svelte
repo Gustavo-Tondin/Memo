@@ -116,36 +116,42 @@
 <!-- Opening a note is the shell's business: it becomes a document tab, the
      same as a list. This screen only ever lists. -->
 <div class="notes-widget">
-  <div class="bar">
+  <div class="notes-widget__bar">
     <input
-      class="search"
+      class="notes-widget__search"
       placeholder={S.searchNotes}
       aria-label={S.searchNotes}
       bind:value={query}
     />
     <button
-      class:active={layout === "grid"}
+      class="notes-widget__bar-button"
+      class:notes-widget__bar-button--active={layout === "grid"}
       onclick={() => (chosenLayout = "grid")}>{S.gridView}</button
     >
     <button
-      class:active={layout === "tree"}
+      class="notes-widget__bar-button"
+      class:notes-widget__bar-button--active={layout === "tree"}
       onclick={() => (chosenLayout = "tree")}>{S.treeView}</button
     >
     {#if !readOnly}
-      <button onclick={create}>{S.newNote}</button>
-      <button onclick={createFolder}>{S.newNoteFolder}</button>
+      <button class="notes-widget__bar-button" onclick={create}>{S.newNote}</button>
+      <button class="notes-widget__bar-button" onclick={createFolder}
+        >{S.newNoteFolder}</button
+      >
     {/if}
   </div>
 
   {#if layout === "tree"}
-    <nav class="folders">
+    <nav class="notes-widget__folders">
       <button
-        class:active={openFolder === null}
+        class="notes-widget__folder"
+        class:notes-widget__folder--active={openFolder === null}
         onclick={() => (openFolder = null)}>{S.allNotes}</button
       >
       {#each folders as name (name)}
         <button
-          class:active={openFolder === name}
+          class="notes-widget__folder"
+          class:notes-widget__folder--active={openFolder === name}
           onclick={() => (openFolder = name)}>{name}</button
         >
       {/each}
@@ -155,30 +161,43 @@
          one is open — a folder is not deletable from the board view, where
          nothing says which one you mean. -->
     {#if !readOnly && openFolder}
-      <p class="folder-actions">
-        <button onclick={renameFolder}>{S.renameFolder}</button>
-        <button onclick={deleteFolder}>{S.deleteFolder}</button>
+      <p class="notes-widget__folder-actions">
+        <button class="notes-widget__folder-action" onclick={renameFolder}
+          >{S.renameFolder}</button
+        >
+        <button class="notes-widget__folder-action" onclick={deleteFolder}
+          >{S.deleteFolder}</button
+        >
       </p>
     {/if}
   {/if}
 
   {#if shown.length === 0}
-    <p class="empty">{query.trim() ? S.noNotesFound : S.noNotes}</p>
+    <p class="notes-widget__empty">{query.trim() ? S.noNotesFound : S.noNotes}</p>
   {:else}
-    <ul class="board" class:tree={layout === "tree"}>
+    <ul
+      class="notes-widget__board"
+      class:notes-widget__board--tree={layout === "tree"}
+    >
       {#each shown as entry (entry.path)}
-        <li class:pinned={entry.pinned}>
-          <button class="card" onclick={() => onOpenNote?.(entry.path, folder)}>
-            <strong>{entry.title}</strong>
-            <span class="preview">{entry.preview || S.emptyNote}</span>
-            <small>
+        <li
+          class="notes-widget__item"
+          class:notes-widget__item--pinned={entry.pinned}
+        >
+          <button
+            class="notes-widget__card"
+            onclick={() => onOpenNote?.(entry.path, folder)}
+          >
+            <strong class="notes-widget__card-title">{entry.title}</strong>
+            <span class="notes-widget__preview">{entry.preview || S.emptyNote}</span>
+            <small class="notes-widget__meta">
               {entry.folder}
               {#if entry.pinned}· {S.pinned}{/if}
             </small>
           </button>
           {#if !readOnly}
             <button
-              class="pin"
+              class="notes-widget__pin"
               onclick={() => togglePin(entry)}
               aria-label={entry.pinned ? S.unpin : S.pin}>★</button
             >
@@ -190,26 +209,26 @@
 </div>
 
 <style>
-  .bar {
+  .notes-widget__bar {
     display: flex;
     gap: 0.5rem;
     align-items: center;
     margin-bottom: 0.75rem;
   }
-  .search {
+  .notes-widget__search {
     flex: 1;
     font: inherit;
   }
-  .bar button.active {
+  .notes-widget__bar-button--active {
     font-weight: 600;
   }
-  .folders {
+  .notes-widget__folders {
     display: flex;
     flex-wrap: wrap;
     gap: 0.25rem;
     margin-bottom: 0.75rem;
   }
-  .folders button {
+  .notes-widget__folder {
     background: none;
     border: 1px solid #ddd;
     border-radius: 12px;
@@ -218,17 +237,17 @@
     font-size: 0.85rem;
     cursor: pointer;
   }
-  .folders button.active {
+  .notes-widget__folder--active {
     background: #eef2ff;
     border-color: #b9c6f5;
   }
-  .folder-actions {
+  .notes-widget__folder-actions {
     display: flex;
     gap: 0.5rem;
     margin: -0.4rem 0 0.75rem;
     font-size: 0.85rem;
   }
-  .folder-actions button {
+  .notes-widget__folder-action {
     background: none;
     border: none;
     color: #666;
@@ -239,7 +258,7 @@
   }
   /* The grid is a masonry-ish board of cards; the tree view is one column,
      since it is already filtered to a folder. */
-  .board {
+  .notes-widget__board {
     list-style: none;
     padding: 0;
     margin: 0;
@@ -247,18 +266,18 @@
     grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
     gap: 0.6rem;
   }
-  .board.tree {
+  .notes-widget__board--tree {
     grid-template-columns: 1fr;
   }
-  li {
+  .notes-widget__item {
     position: relative;
     border: 1px solid #ddd;
     border-radius: 6px;
   }
-  li.pinned {
+  .notes-widget__item--pinned {
     border-color: #d9c26a;
   }
-  .card {
+  .notes-widget__card {
     display: flex;
     flex-direction: column;
     gap: 0.3rem;
@@ -270,18 +289,18 @@
     cursor: pointer;
     padding: 0.6rem 0.7rem;
   }
-  .preview {
+  .notes-widget__preview {
     color: #555;
     font-size: 0.85rem;
     line-height: 1.35;
     max-height: 5.4em;
     overflow: hidden;
   }
-  .card small {
+  .notes-widget__meta {
     color: #888;
     font-size: 0.75rem;
   }
-  .pin {
+  .notes-widget__pin {
     position: absolute;
     top: 0.3rem;
     right: 0.35rem;
@@ -291,10 +310,10 @@
     color: #bbb;
     font-size: 0.9rem;
   }
-  li.pinned .pin {
+  .notes-widget__item--pinned .notes-widget__pin {
     color: #c8a52e;
   }
-  .empty {
+  .notes-widget__empty {
     color: #666;
   }
 </style>

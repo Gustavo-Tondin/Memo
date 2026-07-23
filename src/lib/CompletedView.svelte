@@ -42,49 +42,52 @@
   }
 </script>
 
-<h2>{S.completed}</h2>
+<h2 class="completed-view__title">{S.completed}</h2>
 
 {#if tasks.length === 0}
-  <p class="empty">{S.nothingCompleted}</p>
+  <p class="completed-view__empty">{S.nothingCompleted}</p>
 {:else}
-  <ul>
+  <ul class="completed-view__list">
     <!-- See ListView: position is part of the key so a duplicated id cannot
          take the whole screen down. -->
     {#each tasks as task, i (`${task.id ?? ""}#${i}`)}
-      <li>
+      <li class="completed-view__item">
         <input
+          class="completed-view__checkbox"
           type="checkbox"
           checked={task.done}
           disabled={readOnly || !task.id}
           onchange={() => uncomplete(task.id)}
           aria-label={S.uncheck}
         />
-        <span class="done">{task.text}</span>
-        {#if task.origin}<small>{S.goesBackTo(task.origin)}</small>{/if}
+        <span class="completed-view__text">{task.text}</span>
+        {#if task.origin}<small class="completed-view__origin"
+            >{S.goesBackTo(task.origin)}</small
+          >{/if}
       </li>
     {/each}
   </ul>
 {/if}
 
 <style>
-  ul {
+  .completed-view__list {
     list-style: none;
     padding: 0;
   }
-  li {
+  .completed-view__item {
     display: flex;
     align-items: center;
     gap: 0.5rem;
     padding: 0.15rem 0;
   }
-  .done {
+  .completed-view__text {
     text-decoration: line-through;
     color: #555;
   }
-  small {
+  .completed-view__origin {
     color: #666;
   }
-  .empty {
+  .completed-view__empty {
     color: #666;
   }
 </style>

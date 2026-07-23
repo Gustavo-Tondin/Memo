@@ -36,16 +36,22 @@
 
 <section class="tasks-widget">
   {#if widget.invalidFolder}
-    <p class="warn">{S.invalidWidgetFolder}</p>
+    <p class="tasks-widget__note tasks-widget__note--warn">
+      {S.invalidWidgetFolder}
+    </p>
   {:else if own.length === 0}
-    <p class="empty">{S.widgetNoLists}</p>
+    <p class="tasks-widget__note">{S.widgetNoLists}</p>
   {:else}
-    <ul>
+    <ul class="tasks-widget__list">
       {#each own as entry (entry.path)}
-        <li>
-          <button onclick={() => onOpenList?.(entry.path)}>
+        <li class="tasks-widget__item">
+          <button
+            class="tasks-widget__link"
+            onclick={() => onOpenList?.(entry.path)}
+          >
             {listName(entry.path)}
-            {#if counts[entry.path]}<span class="count">{counts[entry.path]}</span
+            {#if counts[entry.path]}<span class="tasks-widget__count"
+                >{counts[entry.path]}</span
               >{/if}
           </button>
         </li>
@@ -55,12 +61,12 @@
 </section>
 
 <style>
-  ul {
+  .tasks-widget__list {
     list-style: none;
     margin: 0;
     padding: 0;
   }
-  li button {
+  .tasks-widget__link {
     background: none;
     border: none;
     font: inherit;
@@ -70,20 +76,19 @@
     width: 100%;
     text-align: left;
   }
-  li button:hover {
+  .tasks-widget__link:hover {
     background: #eee;
   }
-  .count {
+  .tasks-widget__count {
     float: right;
     color: #666;
     font-size: 0.85rem;
   }
-  .empty,
-  .warn {
+  .tasks-widget__note {
     color: #666;
     font-size: 0.9rem;
   }
-  .warn {
+  .tasks-widget__note--warn {
     color: #a00;
   }
 </style>

@@ -69,12 +69,12 @@
   const edit = (l, id, text) => act(() => api.editTaskText(l, id, text));
 </script>
 
-<h2>{listName(list)}</h2>
+<h2 class="list-view__title">{listName(list)}</h2>
 
 {#if tasks.length === 0}
-  <p class="empty">{S.emptyList}</p>
+  <p class="list-view__empty">{S.emptyList}</p>
 {:else}
-  <ul>
+  <ul class="list-view__list">
     <!-- Keyed by position as well as id: a duplicated id would otherwise be a
          duplicate key, and Svelte aborts rendering the whole list. A read-only
          notebook never gets its ids de-duplicated, so this can still happen. -->
@@ -88,8 +88,12 @@
         onEdit={edit}
         {dateFormat}
       >
-        <button onclick={() => pull("day", task)}>{S.pullToToday}</button>
-        <button onclick={() => pull("week", task)}>{S.pullToWeek}</button>
+        <button class="list-view__action" onclick={() => pull("day", task)}
+          >{S.pullToToday}</button
+        >
+        <button class="list-view__action" onclick={() => pull("week", task)}
+          >{S.pullToWeek}</button
+        >
       </TaskRow>
     {/each}
   </ul>
@@ -98,26 +102,30 @@
 <!-- Below the list, not above it: adding is what you do after reading what is
      already there, and a field on top pushes the list down every render. -->
 {#if !readOnly}
-  <form onsubmit={(e) => (e.preventDefault(), add())}>
-    <input placeholder={S.newTaskPlaceholder} bind:value={newText} />
-    <button type="submit">{S.addTask}</button>
+  <form class="list-view__form" onsubmit={(e) => (e.preventDefault(), add())}>
+    <input
+      class="list-view__input"
+      placeholder={S.newTaskPlaceholder}
+      bind:value={newText}
+    />
+    <button class="list-view__submit" type="submit">{S.addTask}</button>
   </form>
 {/if}
 
 <style>
-  ul {
+  .list-view__list {
     list-style: none;
     padding: 0;
   }
-  .empty {
+  .list-view__empty {
     color: #666;
   }
-  form {
+  .list-view__form {
     display: flex;
     gap: 0.5rem;
     margin-top: 1rem;
   }
-  form input {
+  .list-view__input {
     flex: 1;
   }
 </style>

@@ -26,38 +26,52 @@
 </script>
 
 <header class="page-header">
-  <div class="arrows">
-    <button disabled={!canBack} aria-label={S.goBack} onclick={() => onBack?.()}
-      >←</button
+  <div class="page-header__nav">
+    <button
+      class="page-header__arrow"
+      disabled={!canBack}
+      aria-label={S.goBack}
+      onclick={() => onBack?.()}>←</button
     >
     <button
+      class="page-header__arrow"
       disabled={!canForward}
       aria-label={S.goForward}
       onclick={() => onForward?.()}>→</button
     >
   </div>
 
-  <h1>
+  <h1 class="page-header__heading">
     {#if onRenameTitle}
-      <button class="title" title={S.promptRenameNote(title)} onclick={() => onRenameTitle()}>
+      <button
+        class="page-header__name"
+        title={S.promptRenameNote(title)}
+        onclick={() => onRenameTitle()}
+      >
         {title}
       </button>
     {:else}
       {title}
-    {/if}{#if subtitle}<span class="subtitle"> — {subtitle}</span>{/if}
+    {/if}{#if subtitle}<span class="page-header__subtitle"> — {subtitle}</span
+      >{/if}
   </h1>
 
   {#if menu.length > 0}
-    <div class="menu">
-      <button aria-label={S.pageMenu} onclick={() => (open = !open)}>•••</button>
+    <div class="page-header__menu">
+      <button
+        class="page-header__menu-toggle"
+        aria-label={S.pageMenu}
+        onclick={() => (open = !open)}>•••</button
+      >
       {#if open}
         <!-- Closing on each item, not on the list: a click handler on a
              non-interactive element is invisible to a keyboard and to a
              screen reader. -->
-        <ul>
+        <ul class="page-header__menu-list">
           {#each menu as item (item.label)}
-            <li>
+            <li class="page-header__menu-item">
               <button
+                class="page-header__menu-link"
                 onclick={() => {
                   open = false;
                   item.run();
@@ -78,7 +92,7 @@
     gap: 0.75rem;
     padding: 0.5rem 1rem;
   }
-  h1 {
+  .page-header__heading {
     flex: 1;
     margin: 0;
     text-align: center;
@@ -88,31 +102,35 @@
     text-transform: uppercase;
     color: #666;
   }
-  .subtitle {
+  .page-header__subtitle {
     font-weight: 400;
   }
   /* The document's own name, clicked to rename it — the only place it
      appears, right under the tabs. */
-  .title {
+  .page-header__name {
     font: inherit;
     color: inherit;
     letter-spacing: inherit;
     text-transform: inherit;
     padding: 0.1rem 0.4rem;
+    background: none;
+    border: none;
+    cursor: pointer;
   }
-  .title:hover {
+  .page-header__name:hover {
     background: #eee;
     color: #222;
   }
-  .arrows,
-  .menu {
+  .page-header__nav,
+  .page-header__menu {
     display: flex;
     gap: 0.15rem;
   }
-  .menu {
+  .page-header__menu {
     position: relative;
   }
-  button {
+  .page-header__arrow,
+  .page-header__menu-toggle {
     background: none;
     border: none;
     font: inherit;
@@ -121,15 +139,16 @@
     padding: 0.1rem 0.35rem;
     border-radius: 4px;
   }
-  button:hover:not(:disabled) {
+  .page-header__arrow:hover:not(:disabled),
+  .page-header__menu-toggle:hover:not(:disabled) {
     background: #eee;
     color: #222;
   }
-  button:disabled {
+  .page-header__arrow:disabled {
     color: #ccc;
     cursor: default;
   }
-  ul {
+  .page-header__menu-list {
     position: absolute;
     right: 0;
     top: 1.6rem;
@@ -143,10 +162,18 @@
     border-radius: 6px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
   }
-  ul button {
+  .page-header__menu-link {
     width: 100%;
     text-align: left;
     color: #222;
     padding: 0.3rem 0.5rem;
+    background: none;
+    border: none;
+    font: inherit;
+    cursor: pointer;
+    border-radius: 4px;
+  }
+  .page-header__menu-link:hover {
+    background: #eee;
   }
 </style>
