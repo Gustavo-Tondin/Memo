@@ -1,15 +1,37 @@
-/* Bare minimum for now: the real design comes once the app is fully
-   functional. Logic first, looks later. */
+/* app.css — the aggregator. It sets the cascade order once (@layer) and pulls
+   in the token layer. Element/base styling, the stable .memo-* component hooks,
+   and utilities land in their own layers as each screen is rebuilt (Fase 10).
 
-:root {
-  font-family: system-ui, sans-serif;
-  color-scheme: light dark;
-}
+   Cascade order, weakest → strongest:
+     reset       browser normalisation
+     tokens      the design values (tokens.css)
+     base        element defaults reading tokens (p, h1, button…)
+     components  the stable class hooks a theme can restyle (.memo-*)
+     utilities   one-off helpers
+     overrides   escape hatch
+   A user theme is injected UNLAYERED, so it wins over every layer above without
+   a specificity fight. See docs/project-strategy.md 4.6. */
 
-body {
-  margin: 0;
-}
+@layer reset, tokens, base, components, utilities, overrides;
 
-main {
-  padding: 21px;
+@import "./styles/tokens.css";
+
+@layer reset {
+  :root {
+    color-scheme: light;
+  }
+
+  html,
+  body,
+  #app {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    /* Frameless window: the page is transparent so the rounded corners of the
+       .window frame reveal the desktop through them — GNOME/Wayland draws no
+       decoration of its own. */
+    background: transparent;
+  }
 }

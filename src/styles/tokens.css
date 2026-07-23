@@ -1,0 +1,157 @@
+/* =============================================================================
+   tokens.css — the single source of design values for the whole app.
+
+   TWO TIERS, and the split is the whole point of this file:
+
+     1. --palette-*   Raw values (the Figma scale). Named after what they ARE
+                      (blue, gray-mute). A component must NEVER read these.
+     2. --theme-*     Semantic roles. Named after what they DO (bg, ink, line,
+                      brand). Components read ONLY these.
+
+   Why: a theme is then "one file that redefines --theme-*", never a file that
+   knows the inside of every component. A dark theme flips --theme-ink to a
+   light value without the token being called "dark" — which is why the palette
+   layer exists underneath. See docs/project-strategy.md 4.6.
+
+   Prefix is `theme-` (not `memo-`): the product name is provisional, and these
+   names are meant to outlive it. When the user picks a custom font or a
+   community theme drops in, this is the surface it touches.
+   ============================================================================= */
+
+/* Inter, self-hosted (local-first: no font CDN at runtime). Variable weight,
+   latin subset — one file covers 400/500/600/700 used across the design. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("../assets/fonts/Inter-latin-wght-normal.woff2") format("woff2");
+}
+
+@layer tokens {
+  :root {
+    /* ---------------------------------------------------------------------
+       TIER 1 — primitives (the Figma palette). Do not read these from a
+       component; they exist so the semantic layer below has something to
+       point at, and so a theme can re-scale the palette if it wants.
+       --------------------------------------------------------------------- */
+    --palette-blue: #0080ff;
+    --palette-blue-light: #dbe6fd;
+    --palette-blue-outline: #99b6f4;
+    --palette-dark: #212c3b;
+    --palette-dark-mute: #5a7087;
+    --palette-gray: #f1f5f8;
+    --palette-gray-divider: #d8e3e9;
+    --palette-gray-mute: #a2b5c3;
+    --palette-light: #fcfdfd;
+    --palette-red: #f86f76;
+    --palette-green: #8cec71;
+
+    /* ---------------------------------------------------------------------
+       TIER 2 — semantic roles. THIS is the app's contract. Components read
+       only these; a theme redefines only these.
+       --------------------------------------------------------------------- */
+
+    /* surfaces, from furthest-back to closest */
+    --theme-bg: var(--palette-gray); /* the window canvas behind everything */
+    --theme-surface: var(--palette-light); /* raised: content panel, tabs, cards, fields */
+    --theme-surface-sunken: var(--palette-gray); /* inset on a surface: task cards, chips, groups */
+
+    /* text and icons, by emphasis */
+    --theme-ink: var(--palette-dark); /* primary text */
+    --theme-ink-muted: var(--palette-dark-mute); /* secondary text, most icons */
+    --theme-ink-faint: var(--palette-gray-mute); /* placeholder, disabled, close × */
+    --theme-on-brand: var(--palette-light); /* text/icon sitting on a brand fill */
+
+    /* lines */
+    --theme-line: var(--palette-gray-divider); /* dividers, card borders */
+    --theme-line-soft: var(--palette-gray); /* the faintest border (note cards) */
+
+    /* brand (the blue) */
+    --theme-brand: var(--palette-blue);
+    --theme-brand-weak: var(--palette-blue-light); /* active-nav bg, highlighted task */
+    --theme-brand-outline: var(--palette-blue-outline); /* border of a highlighted item */
+
+    /* status */
+    --theme-danger: var(--palette-red); /* overdue date, destructive action */
+    --theme-success: var(--palette-green); /* a finished progress bar */
+
+    /* ---------------------------------------------------------------------
+       SPACING — the design's real values (not the global Fibonacci scale:
+       this is a specific Figma design, fidelity wins). Named by px.
+       --------------------------------------------------------------------- */
+    --theme-space-2: 0.125rem; /*  2px */
+    --theme-space-4: 0.25rem; /*  4px */
+    --theme-space-6: 0.375rem; /*  6px */
+    --theme-space-8: 0.5rem; /*  8px */
+    --theme-space-10: 0.625rem; /* 10px */
+    --theme-space-12: 0.75rem; /* 12px */
+    --theme-space-16: 1rem; /* 16px */
+    --theme-space-24: 1.5rem; /* 24px */
+    --theme-space-32: 2rem; /* 32px */
+    --theme-space-40: 2.5rem; /* 40px */
+    --theme-space-48: 3rem; /* 48px */
+    --theme-space-64: 4rem; /* 64px */
+
+    /* ---------------------------------------------------------------------
+       RADIUS
+       --------------------------------------------------------------------- */
+    --theme-radius-xs: 6px;
+    --theme-radius-sm: 8px;
+    --theme-radius-md: 10px;
+    --theme-radius-lg: 12px;
+    --theme-radius-pill: 999px;
+
+    /* ---------------------------------------------------------------------
+       TYPOGRAPHY
+       --------------------------------------------------------------------- */
+    --theme-font-sans: "Inter", system-ui, sans-serif;
+
+    --theme-text-8: 0.5rem; /*  8px — tag pill */
+    --theme-text-10: 0.625rem; /* 10px — task meta date */
+    --theme-text-12: 0.75rem; /* 12px — right panel, breadcrumb */
+    --theme-text-13: 0.8125rem; /* 13px — primary button */
+    --theme-text-14: 0.875rem; /* 14px — tabs, nav labels, body small */
+    --theme-text-16: 1rem; /* 16px — task title, nav, base body */
+    --theme-text-18: 1.125rem; /* 18px — nav-arrow icons */
+    --theme-text-24: 1.5rem; /* 24px — block heading */
+
+    --theme-weight-regular: 400;
+    --theme-weight-medium: 500;
+    --theme-weight-semibold: 600;
+    --theme-weight-bold: 700;
+
+    --theme-tracking-tight: -0.01em;
+    --theme-tracking-normal: 0;
+    --theme-tracking-wide: 0.06em; /* the letter-spacing:1px of headings/labels */
+    --theme-tracking-wider: 0.12em; /* breadcrumb / group titles (letter-spacing:2px) */
+
+    --theme-leading-tight: 1.2;
+    --theme-leading-normal: 1.5;
+    --theme-leading-loose: 1.6; /* note body */
+
+    /* ---------------------------------------------------------------------
+       LAYOUT — the shell's fixed dimensions. Shared by the title bar and the
+       three-panel row so the tab strip aligns with the centre panel by
+       construction. Likely to change; changing them here moves both.
+       --------------------------------------------------------------------- */
+    --theme-sidebar-left: 220px;
+    --theme-sidebar-right: 240px;
+    --theme-titlebar-height: 38px;
+    --theme-content-max: 720px;
+
+    /* ---------------------------------------------------------------------
+       MOTION
+       --------------------------------------------------------------------- */
+    --theme-transition-fast: 0.15s ease;
+    --theme-transition-medium: 0.25s ease;
+
+    /* ---------------------------------------------------------------------
+       WINDOW — frameless chrome the app draws itself (GNOME/Wayland gives no
+       rounding or shadow to an undecorated window). Kept as tokens so a theme
+       can soften or square them.
+       --------------------------------------------------------------------- */
+    --theme-window-radius: 12px;
+    --theme-window-shadow: 0 12px 32px rgba(33, 44, 59, 0.18);
+  }
+}
